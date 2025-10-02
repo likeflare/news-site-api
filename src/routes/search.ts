@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getDatabaseClient } from "../config/database";
 import { optionalAuth } from "../middleware/auth";
 
+import { validateQuery, searchQuerySchema } from "../middleware/validation";
 const router = Router();
 
 // Helper to parse JSON field
@@ -72,7 +73,7 @@ function transformArticleRow(row: any): any {
 }
 
 // GET /api/search?q=searchterm
-router.get("/", optionalAuth, async (req, res) => {
+router.get("/", optionalAuth, validateQuery(searchQuerySchema), async (req, res) => {
   try {
     const { q, limit = "20", offset = "0" } = req.query;
 

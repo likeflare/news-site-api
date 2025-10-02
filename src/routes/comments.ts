@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getDatabaseClient } from "../config/database";
 import { requireAuth, optionalAuth } from "../middleware/auth";
 import { commentRateLimiter } from "../middleware/rateLimit";
+import { validateQuery, commentsQuerySchema } from "../middleware/validation";
 import { validateBody } from "../middleware/validation";
 import { createCommentSchema } from "../middleware/validation";
 import { sanitizeCommentContent } from "../middleware/sanitize";
@@ -9,7 +10,7 @@ import { sanitizeCommentContent } from "../middleware/sanitize";
 const router = Router();
 
 // GET /api/comments?articleId=xxx
-router.get("/", optionalAuth, async (req, res) => {
+router.get("/", optionalAuth, validateQuery(commentsQuerySchema), async (req, res) => {
   try {
     const { articleId } = req.query;
     const user = (req as any).user;
@@ -136,7 +137,7 @@ router.post(
           articleId,
           parentId || null,
           user.name,
-          user.email,
+          user.userId,
           null,
           sanitizedContent,
           now,
@@ -182,15 +183,15 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
 
     // Check if user already liked this comment
     const likeCheck = await client.execute({
-      sql: "SELECT id FROM comment_likes WHERE comment_id = ? AND user_email = ?",
-      args: [commentId, user.email],
+      sql: "SELECT id FROM comment_likes WHERE comment_id = ? AND user_id = ?",
+      args: [commentId, user.userId],
     });
 
     if (likeCheck.rows.length > 0) {
       // Unlike - remove the like
       await client.execute({
-        sql: "DELETE FROM comment_likes WHERE comment_id = ? AND user_email = ?",
-        args: [commentId, user.email],
+        sql: "DELETE FROM comment_likes WHERE comment_id = ? AND user_id = ?",
+        args: [commentId, user.userId],
       });
 
       res.json({ success: true, action: "unliked" });
@@ -201,10 +202,10 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
 
       await client.execute({
         sql: `
-          INSERT INTO comment_likes (id, comment_id, user_email, created_at, created_at_int)
-          VALUES (?, ?, ?, datetime('now'), ?)
+          INSERT INTO comment_likes (id, comment_id, user_id)
+          VALUES (?, ?, ?)
         `,
-        args: [likeId, commentId, user.email, now],
+        args: [likeId, commentId, user.userId],
       });
 
       res.json({ success: true, action: "liked" });

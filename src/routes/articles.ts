@@ -2,10 +2,11 @@ import { Router } from "express";
 import { getDatabaseClient } from "../config/database";
 import { optionalAuth } from "../middleware/auth";
 
+import { validateQuery, articlesQuerySchema } from "../middleware/validation";
 const router = Router();
 
 // GET /api/articles - List articles
-router.get("/", optionalAuth, async (req, res) => {
+router.get("/", optionalAuth, validateQuery(articlesQuerySchema), async (req, res) => {
   try {
     const {
       limit = "20",

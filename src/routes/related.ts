@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getDatabaseClient } from "../config/database";
 import { optionalAuth } from "../middleware/auth";
 
+import { validateQuery, relatedQuerySchema } from "../middleware/validation";
 const router = Router();
 
 // Helper to parse JSON field
@@ -71,20 +72,23 @@ function transformArticleRow(row: any): any {
   };
 }
 
-// GET /api/related?articleId=xxx&categoryId=xxx&limit=3
-router.get("/", optionalAuth, async (req, res) => {
+// GET /api/related?articleId=xxx&limit=3
+router.get("/", optionalAuth, validateQuery(relatedQuerySchema), async (req, res) => {
   try {
-    const { articleId, categoryId, limit = "3" } = req.query;
+    const { articleId, limit = "3" } = req.query;
 
-    if (!articleId || !categoryId) {
-      return res.status(400).json({ 
-        error: "articleId and categoryId are required" 
+    if (!articleId) {
+      return res.status(400).json({
+        error: "articleId is required"
       });
     }
 
     const client = getDatabaseClient();
-    const query = `
-      SELECT a.*,
+    const limitNum = parseInt(limit as string);
+
+    // Strategy 1: Find articles with matching tags (best match)
+    const tagBasedQuery = `
+      SELECT DISTINCT a.*,
              au.name as author_name, au.slug as author_slug, au.bio as author_bio,
              au.avatar_url as author_avatar_url, au.twitter_url as author_twitter_url,
              au.linkedin_url as author_linkedin_url, au.title as author_title,
@@ -94,23 +98,76 @@ router.get("/", optionalAuth, async (req, res) => {
              au.created_at as author_created_at, au.updated_at as author_updated_at,
              c.name as category_name, c.slug as category_slug,
              c.description as category_description, c.color as category_color,
-             c.created_at as category_created_at, c.updated_at as category_updated_at
+             c.created_at as category_created_at, c.updated_at as category_updated_at,
+             COUNT(DISTINCT at2.tag_id) as matching_tags
       FROM articles a
       LEFT JOIN authors au ON a.author_id = au.id
       LEFT JOIN categories c ON a.category_id = c.id
+      INNER JOIN article_tags at2 ON a.id = at2.article_id
       WHERE a.is_published = 1
-        AND a.category_id = ?
         AND a.id != ?
-      ORDER BY a.published_at_int DESC
+        AND at2.tag_id IN (
+          SELECT tag_id FROM article_tags WHERE article_id = ?
+        )
+      GROUP BY a.id
+      ORDER BY matching_tags DESC, a.published_at_int DESC
       LIMIT ?
     `;
 
-    const result = await client.execute({
-      sql: query,
-      args: [String(categoryId), String(articleId), parseInt(limit as string)],
+    let result = await client.execute({
+      sql: tagBasedQuery,
+      args: [String(articleId), String(articleId), limitNum],
     });
 
-    const articles = result.rows.map(transformArticleRow);
+    let articles = result.rows.map(transformArticleRow);
+
+    // Strategy 2: If not enough tag-based results, fill with same category
+    if (articles.length < limitNum) {
+      const articleResult = await client.execute({
+        sql: "SELECT category_id FROM articles WHERE id = ?",
+        args: [String(articleId)],
+      });
+
+      if (articleResult.rows.length > 0 && articleResult.rows[0].category_id) {
+        const categoryId = articleResult.rows[0].category_id;
+        const remaining = limitNum - articles.length;
+
+        // Get existing article IDs to exclude
+        const existingIds = articles.map(a => a.id);
+        const placeholders = existingIds.length > 0 
+          ? ` AND a.id NOT IN (${existingIds.map(() => '?').join(',')})` 
+          : '';
+
+        const categoryQuery = `
+          SELECT a.*,
+                 au.name as author_name, au.slug as author_slug, au.bio as author_bio,
+                 au.avatar_url as author_avatar_url, au.twitter_url as author_twitter_url,
+                 au.linkedin_url as author_linkedin_url, au.title as author_title,
+                 au.email as author_email, au.join_date as author_join_date,
+                 au.article_count as author_article_count, au.follower_count as author_follower_count,
+                 au.award_count as author_award_count, au.expertise as author_expertise,
+                 au.created_at as author_created_at, au.updated_at as author_updated_at,
+                 c.name as category_name, c.slug as category_slug,
+                 c.description as category_description, c.color as category_color,
+                 c.created_at as category_created_at, c.updated_at as category_updated_at
+          FROM articles a
+          LEFT JOIN authors au ON a.author_id = au.id
+          LEFT JOIN categories c ON a.category_id = c.id
+          WHERE a.is_published = 1
+            AND a.category_id = ?
+            AND a.id != ?${placeholders}
+          ORDER BY a.published_at_int DESC
+          LIMIT ?
+        `;
+
+        const categoryResult = await client.execute({
+          sql: categoryQuery,
+          args: [String(categoryId), String(articleId), ...existingIds, remaining],
+        });
+
+        articles = [...articles, ...categoryResult.rows.map(transformArticleRow)];
+      }
+    }
 
     res.json({ articles });
   } catch (error) {

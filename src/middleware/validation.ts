@@ -34,6 +34,40 @@ export const createArticleSchema = z.object({
 
 export const updateArticleSchema = createArticleSchema.partial();
 
+// Query parameter validation schemas
+export const articlesQuerySchema = z.object({
+  limit: z.string().regex(/^\d+$/, "limit must be a positive number").optional(),
+  offset: z.string().regex(/^\d+$/, "offset must be a positive number").optional(),
+  categorySlug: z.string().optional(),
+  authorSlug: z.string().optional(),
+  tagSlug: z.string().optional(),
+  featured: z.enum(["true", "false"]).optional(),
+  search: z.string().optional(),
+});
+
+export const commentsQuerySchema = z.object({
+  articleId: z.string().min(1, "articleId is required"),
+  userEmail: z.string().email().optional(),
+});
+
+export const relatedQuerySchema = z.object({
+  articleId: z.string().min(1, "articleId is required"),
+  limit: z.string().regex(/^\d+$/, "limit must be a positive number").optional(),
+});
+
+export const searchQuerySchema = z.object({
+  q: z.string().min(1, "search query is required"),
+  limit: z.string().regex(/^\d+$/, "limit must be a positive number").optional(),
+  offset: z.string().regex(/^\d+$/, "offset must be a positive number").optional(),
+});
+
+export const adminListQuerySchema = z.object({
+  limit: z.string().regex(/^\d+$/, "limit must be a positive number").optional(),
+  offset: z.string().regex(/^\d+$/, "offset must be a positive number").optional(),
+  approved: z.enum(["true", "false"]).optional(),
+  published: z.enum(["true", "false"]).optional(),
+});
+
 // Middleware to validate request body
 export function validateBody(schema: z.ZodSchema) {
   return (req: Request, res: Response, next: NextFunction) => {
