@@ -1,18 +1,23 @@
 import rateLimit from "express-rate-limit";
 
-// Global rate limiter
+// Global rate limiter - increased for build process
 export const globalRateLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "60000"), // 1 minute
-  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "100"),
+  max: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS || "500"), // Increased from 100 to 500 for builds
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
+  // Skip rate limiting for same IP making many different requests (like during build)
+  skip: (req) => {
+    // Skip rate limiting for health checks
+    return req.path === '/health';
+  },
 });
 
 // Strict rate limiter for write operations
 export const writeRateLimiter = rateLimit({
   windowMs: 60000, // 1 minute
-  max: 10, // 10 requests per minute
+  max: 20, // Increased from 10 to 20
   message: "Too many write operations, please slow down.",
 });
 
@@ -26,6 +31,6 @@ export const commentRateLimiter = rateLimit({
 // Admin operations rate limiter
 export const adminRateLimiter = rateLimit({
   windowMs: 60000, // 1 minute
-  max: 100, // 100 admin operations per minute
+  max: 200, // Increased from 100 to 200
   message: "Too many admin operations, please slow down.",
 });
