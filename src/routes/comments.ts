@@ -25,14 +25,14 @@ router.get("/", optionalAuth, async (req, res) => {
       sql: `
         SELECT c.*, 
                COALESCE(COUNT(DISTINCT cl.id), 0) as like_count,
-               COALESCE(MAX(CASE WHEN cl.user_email = ? THEN 1 ELSE 0 END), 0) as isLikedByUser
+               COALESCE(MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END), 0) as isLikedByUser
         FROM comments c
         LEFT JOIN comment_likes cl ON c.id = cl.comment_id
         WHERE c.article_id = ? AND c.parent_id IS NULL AND c.is_approved = 1
         GROUP BY c.id
         ORDER BY c.created_at_int DESC, c.created_at DESC
       `,
-      args: [user?.email || "", articleId],
+      args: [user?.userId || "", articleId],
     });
 
     // Fetch replies for each comment
@@ -50,14 +50,14 @@ router.get("/", optionalAuth, async (req, res) => {
         sql: `
           SELECT c.*, 
                  COALESCE(COUNT(DISTINCT cl.id), 0) as like_count,
-                 COALESCE(MAX(CASE WHEN cl.user_email = ? THEN 1 ELSE 0 END), 0) as isLikedByUser
+                 COALESCE(MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END), 0) as isLikedByUser
           FROM comments c
           LEFT JOIN comment_likes cl ON c.id = cl.comment_id
           WHERE c.parent_id = ? AND c.is_approved = 1
           GROUP BY c.id
           ORDER BY c.created_at_int ASC, c.created_at ASC
         `,
-        args: [user?.email || "", comment.id],
+        args: [user?.userId || "", comment.id],
       });
 
       comment.replies = repliesResult.rows.map((r: any) => ({
