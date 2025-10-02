@@ -5,10 +5,22 @@ import dotenv from "dotenv";
 import { testDatabaseConnection } from "./config/database";
 import { globalRateLimiter } from "./middleware/rateLimit";
 
-// Import routes
+// Import public routes
 import articlesRouter from "./routes/articles";
 import commentsRouter from "./routes/comments";
+import authorsRouter from "./routes/authors";
+import categoriesRouter from "./routes/categories";
+import tagsRouter from "./routes/tags";
+import trendingRouter from "./routes/trending";
+import relatedRouter from "./routes/related";
+import searchRouter from "./routes/search";
+
+// Import admin routes
 import adminCommentsRouter from "./routes/admin/comments";
+import adminAuthorsRouter from "./routes/admin/authors";
+import adminCategoriesRouter from "./routes/admin/categories";
+import adminTagsRouter from "./routes/admin/tags";
+import adminArticlesRouter from "./routes/admin/articles";
 
 // Load environment variables
 dotenv.config();
@@ -45,15 +57,33 @@ app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 // Global rate limiting
 app.use(globalRateLimiter);
 
+// Debug logging
+app.use((req, res, next) => {
+  console.log(`📥 ${req.method} ${req.path}`);
+  next();
+});
+
 // Health check endpoint
 app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// API routes
+// Public API routes
 app.use("/api/articles", articlesRouter);
 app.use("/api/comments", commentsRouter);
+app.use("/api/authors", authorsRouter);
+app.use("/api/categories", categoriesRouter);
+app.use("/api/tags", tagsRouter);
+app.use("/api/trending", trendingRouter);
+app.use("/api/related", relatedRouter);
+app.use("/api/search", searchRouter);
+
+// Admin API routes
+app.use("/api/admin/articles", adminArticlesRouter);
 app.use("/api/admin/comments", adminCommentsRouter);
+app.use("/api/admin/authors", adminAuthorsRouter);
+app.use("/api/admin/categories", adminCategoriesRouter);
+app.use("/api/admin/tags", adminTagsRouter);
 
 // 404 handler
 app.use((req, res) => {
@@ -82,6 +112,28 @@ async function start() {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📝 Environment: ${process.env.NODE_ENV || "development"}`);
       console.log(`🌐 Allowed origins: ${allowedOrigins.join(", ")}`);
+      console.log(`\n📡 Available endpoints:`);
+      console.log(`   Public:`);
+      console.log(`   - GET  /api/articles`);
+      console.log(`   - GET  /api/articles/:slug`);
+      console.log(`   - GET  /api/comments`);
+      console.log(`   - POST /api/comments`);
+      console.log(`   - POST /api/comments/:commentId/like`);
+      console.log(`   - GET  /api/authors`);
+      console.log(`   - GET  /api/authors/:slug`);
+      console.log(`   - GET  /api/categories`);
+      console.log(`   - GET  /api/categories/:slug`);
+      console.log(`   - GET  /api/tags`);
+      console.log(`   - GET  /api/tags/:slug`);
+      console.log(`   - GET  /api/trending`);
+      console.log(`   - GET  /api/related`);
+      console.log(`   - GET  /api/search`);
+      console.log(`   Admin (requires authentication):`);
+      console.log(`   - /api/admin/articles (GET, POST, PUT, DELETE)`);
+      console.log(`   - /api/admin/comments (GET, PUT, DELETE)`);
+      console.log(`   - /api/admin/authors (GET, POST, PUT, DELETE)`);
+      console.log(`   - /api/admin/categories (GET, POST, PUT, DELETE)`);
+      console.log(`   - /api/admin/tags (GET, POST, PUT, DELETE)`);
     });
   } catch (error) {
     console.error("Failed to start server:", error);

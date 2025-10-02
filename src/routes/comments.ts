@@ -162,3 +162,55 @@ router.post(
 );
 
 export default router;
+
+// POST /api/comments/:commentId/like - Like/unlike a comment (requires auth)
+router.post("/:commentId/like", requireAuth, async (req, res) => {
+  try {
+    const { commentId } = req.params;
+    const user = (req as any).user;
+    const client = getDatabaseClient();
+
+    // Check if comment exists
+    const commentCheck = await client.execute({
+      sql: "SELECT id FROM comments WHERE id = ?",
+      args: [commentId],
+    });
+
+    if (commentCheck.rows.length === 0) {
+      return res.status(404).json({ error: "Comment not found" });
+    }
+
+    // Check if user already liked this comment
+    const likeCheck = await client.execute({
+      sql: "SELECT id FROM comment_likes WHERE comment_id = ? AND user_email = ?",
+      args: [commentId, user.email],
+    });
+
+    if (likeCheck.rows.length > 0) {
+      // Unlike - remove the like
+      await client.execute({
+        sql: "DELETE FROM comment_likes WHERE comment_id = ? AND user_email = ?",
+        args: [commentId, user.email],
+      });
+
+      res.json({ success: true, action: "unliked" });
+    } else {
+      // Like - add the like
+      const likeId = `like-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      const now = Math.floor(Date.now() / 1000);
+
+      await client.execute({
+        sql: `
+          INSERT INTO comment_likes (id, comment_id, user_email, created_at, created_at_int)
+          VALUES (?, ?, ?, datetime('now'), ?)
+        `,
+        args: [likeId, commentId, user.email, now],
+      });
+
+      res.json({ success: true, action: "liked" });
+    }
+  } catch (error) {
+    console.error("Like comment error:", error);
+    res.status(500).json({ error: "Failed to like/unlike comment" });
+  }
+});
