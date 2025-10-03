@@ -33,7 +33,7 @@ router.get("/", optionalAuth, validateQuery(commentsQuerySchema), async (req, re
         GROUP BY c.id
         ORDER BY c.created_at_int DESC, c.created_at DESC
       `,
-      args: [user?.userId || "", articleId],
+      args: [user?.id || "", articleId],
     });
 
     // Fetch replies for each comment
@@ -58,7 +58,7 @@ router.get("/", optionalAuth, validateQuery(commentsQuerySchema), async (req, re
           GROUP BY c.id
           ORDER BY c.created_at_int ASC, c.created_at ASC
         `,
-        args: [user?.userId || "", comment.id],
+        args: [user?.id || "", comment.id],
       });
 
       comment.replies = repliesResult.rows.map((r: any) => ({
