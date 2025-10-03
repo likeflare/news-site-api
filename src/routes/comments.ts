@@ -33,7 +33,7 @@ router.get("/", optionalAuth, validateQuery(commentsQuerySchema), async (req, re
         GROUP BY c.id
         ORDER BY c.created_at_int DESC, c.created_at DESC
       `,
-      args: [user?.id || "", articleId],
+      args: [user?.userId || "", articleId],
     });
 
     // Fetch replies for each comment
@@ -58,7 +58,7 @@ router.get("/", optionalAuth, validateQuery(commentsQuerySchema), async (req, re
           GROUP BY c.id
           ORDER BY c.created_at_int ASC, c.created_at ASC
         `,
-        args: [user?.id || "", comment.id],
+        args: [user?.userId || "", comment.id],
       });
 
       comment.replies = repliesResult.rows.map((r: any) => ({
@@ -171,15 +171,6 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
 
     // Check if comment exists
     const commentCheck = await client.execute({
-// POST /api/comments/:commentId/like - Like/unlike a comment (requires auth)
-router.post("/:commentId/like", requireAuth, async (req, res) => {
-  try {
-    const { commentId } = req.params;
-    const user = (req as any).user;
-    const client = getDatabaseClient();
-
-    // Check if comment exists
-    const commentCheck = await client.execute({
       sql: "SELECT id FROM comments WHERE id = ?",
       args: [commentId],
     });
@@ -202,10 +193,12 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
         sql: "DELETE FROM comment_likes WHERE comment_id = ? AND user_id = ?",
         args: [commentId, user.id],
       });
+
       action = "unliked";
     } else {
       // Like - add the like
       const likeId = `like-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      const now = Math.floor(Date.now() / 1000);
 
       await client.execute({
         sql: `
@@ -214,6 +207,7 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
         `,
         args: [likeId, commentId, user.id],
       });
+
       action = "liked";
     }
 
