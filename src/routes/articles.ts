@@ -97,6 +97,8 @@ router.get("/:slug", optionalAuth, async (req, res) => {
           au.avatar_url as author_avatar_url,
           au.twitter_url as author_twitter_url,
           au.linkedin_url as author_linkedin_url,
+          au.article_count as author_article_count,
+          au.follower_count as author_follower_count,
           c.name as category_name,
           c.slug as category_slug,
           c.color as category_color,
