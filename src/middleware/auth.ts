@@ -6,6 +6,7 @@ export interface JWTPayload {
   email?: string;
   name?: string;
   role?: string;
+  image?: string; // User avatar
 }
 
 function getJWTSecret(): string {
@@ -27,13 +28,14 @@ export function verifyToken(req: Request, res: Response, next: NextFunction) {
 
   try {
     const decoded = jwt.verify(token, getJWTSecret()) as JWTPayload;
-    
+
     // Attach user info to request
     (req as any).user = {
       id: decoded.sub || "",
       email: decoded.email || "",
       name: decoded.name || "",
       role: decoded.role || "user",
+      image: decoded.image || null,
     };
 
     next();
@@ -51,7 +53,7 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
     if (err) return;
 
     const user = (req as any).user;
-    
+
     if (!user || user.role !== "admin") {
       return res.status(403).json({ error: "Admin access required" });
     }
@@ -73,12 +75,13 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction) {
 
   try {
     const decoded = jwt.verify(token, getJWTSecret()) as JWTPayload;
-    
+
     (req as any).user = {
       id: decoded.sub || "",
       email: decoded.email || "",
       name: decoded.name || "",
       role: decoded.role || "user",
+      image: decoded.image || null,
     };
   } catch (error) {
     // Invalid token, but don't fail - just continue without user

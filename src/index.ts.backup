@@ -14,7 +14,6 @@ import tagsRouter from "./routes/tags";
 import trendingRouter from "./routes/trending";
 import relatedRouter from "./routes/related";
 import searchRouter from "./routes/search";
-import articleLikesRouter from "./routes/article-likes";
 
 // Import admin routes
 import adminCommentsRouter from "./routes/admin/comments";
@@ -86,7 +85,6 @@ app.use("/api/users", usersRouter);
 app.use("/api/trending", trendingRouter);
 app.use("/api/related", relatedRouter);
 app.use("/api/search", searchRouter);
-app.use("/api/article-likes", articleLikesRouter);
 
 // Admin API routes
 app.use("/api/admin/articles", adminArticlesRouter);
@@ -129,8 +127,6 @@ async function start() {
       console.log(`   - GET  /api/comments`);
       console.log(`   - POST /api/comments`);
       console.log(`   - POST /api/comments/:commentId/like`);
-      console.log(`   - POST /api/article-likes/:articleId`);
-      console.log(`   - GET  /api/article-likes/:articleId`);
       console.log(`   - GET  /api/authors`);
       console.log(`   - GET  /api/authors/:slug`);
       console.log(`   - GET  /api/categories`);

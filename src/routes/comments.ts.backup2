@@ -171,15 +171,6 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
 
     // Check if comment exists
     const commentCheck = await client.execute({
-// POST /api/comments/:commentId/like - Like/unlike a comment (requires auth)
-router.post("/:commentId/like", requireAuth, async (req, res) => {
-  try {
-    const { commentId } = req.params;
-    const user = (req as any).user;
-    const client = getDatabaseClient();
-
-    // Check if comment exists
-    const commentCheck = await client.execute({
       sql: "SELECT id FROM comments WHERE id = ?",
       args: [commentId],
     });
@@ -194,18 +185,18 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
       args: [commentId, user.id],
     });
 
-    let action: string;
-    
     if (likeCheck.rows.length > 0) {
       // Unlike - remove the like
       await client.execute({
         sql: "DELETE FROM comment_likes WHERE comment_id = ? AND user_id = ?",
         args: [commentId, user.id],
       });
-      action = "unliked";
+
+      res.json({ success: true, action: "unliked" });
     } else {
       // Like - add the like
       const likeId = `like-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      const now = Math.floor(Date.now() / 1000);
 
       await client.execute({
         sql: `
@@ -214,29 +205,9 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
         `,
         args: [likeId, commentId, user.id],
       });
-      action = "liked";
+
+      res.json({ success: true, action: "liked" });
     }
-
-    // Get updated like count and user like status
-    const likeCountResult = await client.execute({
-      sql: `
-        SELECT 
-          COUNT(DISTINCT cl.id) as like_count,
-          MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END) as isLikedByUser
-        FROM comment_likes cl
-        WHERE cl.comment_id = ?
-      `,
-      args: [user.id, commentId],
-    });
-
-    const likeData = likeCountResult.rows[0];
-
-    res.json({ 
-      success: true, 
-      action,
-      like_count: Number(likeData?.like_count || 0),
-      isLikedByUser: Boolean(likeData?.isLikedByUser || 0)
-    });
   } catch (error) {
     console.error("Like comment error:", error);
     res.status(500).json({ error: "Failed to like/unlike comment" });
