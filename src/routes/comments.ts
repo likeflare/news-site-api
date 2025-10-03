@@ -137,7 +137,7 @@ router.post(
           articleId,
           parentId || null,
           user.name,
-          user.userId,
+          user.id,
           null,
           sanitizedContent,
           now,
@@ -184,14 +184,14 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
     // Check if user already liked this comment
     const likeCheck = await client.execute({
       sql: "SELECT id FROM comment_likes WHERE comment_id = ? AND user_id = ?",
-      args: [commentId, user.userId],
+      args: [commentId, user.id],
     });
 
     if (likeCheck.rows.length > 0) {
       // Unlike - remove the like
       await client.execute({
         sql: "DELETE FROM comment_likes WHERE comment_id = ? AND user_id = ?",
-        args: [commentId, user.userId],
+        args: [commentId, user.id],
       });
 
       res.json({ success: true, action: "unliked" });
@@ -205,7 +205,7 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
           INSERT INTO comment_likes (id, comment_id, user_id)
           VALUES (?, ?, ?)
         `,
-        args: [likeId, commentId, user.userId],
+        args: [likeId, commentId, user.id],
       });
 
       res.json({ success: true, action: "liked" });

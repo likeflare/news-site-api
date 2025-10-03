@@ -79,6 +79,7 @@ export interface User {
   avatar_url?: string;
   provider: string;
   provider_id: string;
+  role: string; // Added role field
   created_at: string | number;
   updated_at: string | number;
   created_at_int?: number;
