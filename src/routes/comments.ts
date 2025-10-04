@@ -7,7 +7,6 @@ import { validateBody } from "../middleware/validation";
 import { createCommentSchema } from "../middleware/validation";
 import { sanitizeCommentContent } from "../middleware/sanitize";
 
-import { revalidateArticle } from "../utils/revalidate";
 const router = Router();
 
 // GET /api/comments?articleId=xxx
@@ -156,29 +155,6 @@ router.post(
       });
 
       // Get article category and slug for revalidation
-      const articleResult = await client.execute({
-        sql: `
-          SELECT a.slug, c.slug as category_slug
-          FROM articles a
-          LEFT JOIN categories c ON a.category_id = c.id
-          WHERE a.id = ?
-        `,
-        args: [articleId],
-      });
-
-      // Trigger revalidation asynchronously (don't wait for it)
-      if (articleResult.rows.length > 0) {
-        const article = articleResult.rows[0];
-        const categorySlug = article.category_slug as string | null;
-        const slug = article.slug as string | null;
-        if (categorySlug && slug) {
-          revalidateArticle({
-            category: categorySlug,
-            slug: slug,
-          }).catch(err => console.error("Revalidation error:", err));
-        }
-      }
-
       res.status(201).json({
         success: true,
         comment: commentResult.rows[0],
@@ -252,30 +228,6 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
 
     const likeData = likeCountResult.rows[0];
 
-    // Get article info for revalidation
-    const articleResult = await client.execute({
-      sql: `
-        SELECT a.slug, cat.slug as category_slug
-        FROM comments c
-        JOIN articles a ON c.article_id = a.id
-        LEFT JOIN categories cat ON a.category_id = cat.id
-        WHERE c.id = ?
-      `,
-      args: [commentId],
-    });
-
-    // Trigger revalidation asynchronously
-    if (articleResult.rows.length > 0) {
-      const article = articleResult.rows[0];
-      const categorySlug = article.category_slug as string | null;
-      const slug = article.slug as string | null;
-      if (categorySlug && slug) {
-        revalidateArticle({
-          category: categorySlug,
-          slug: slug,
-        }).catch(err => console.error("Revalidation error:", err));
-      }
-    }
 
     res.json({
       success: true,
