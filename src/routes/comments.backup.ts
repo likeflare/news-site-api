@@ -22,18 +22,15 @@ router.get("/", optionalAuth, validateQuery(commentsQuerySchema), async (req, re
     const client = getDatabaseClient();
 
     // Fetch top-level comments
-    // NOTE: We select individual columns (not c.*) to avoid column name conflict with like_count
     const result = await client.execute({
       sql: `
-        SELECT 
-          c.id, c.article_id, c.parent_id, c.author_name, c.author_email, 
-          c.author_avatar, c.content, c.is_approved, c.created_at, c.updated_at,
-          c.user_id, c.created_at_int, c.updated_at_int,
-          (SELECT COUNT(*) FROM comment_likes WHERE comment_id = c.id) as like_count,
-          (SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END 
-           FROM comment_likes WHERE comment_id = c.id AND user_id = ?) as isLikedByUser
+        SELECT c.*,
+               COALESCE(COUNT(cl.id), 0) as like_count,
+               COALESCE(MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END), 0) as isLikedByUser
         FROM comments c
+        LEFT JOIN comment_likes cl ON c.id = cl.comment_id
         WHERE c.article_id = ? AND c.parent_id IS NULL AND c.is_approved = 1
+        GROUP BY c.id
         ORDER BY c.created_at_int DESC, c.created_at DESC
       `,
       args: [user?.id || "", articleId],
@@ -52,15 +49,13 @@ router.get("/", optionalAuth, validateQuery(commentsQuerySchema), async (req, re
       // Fetch replies
       const repliesResult = await client.execute({
         sql: `
-          SELECT 
-            c.id, c.article_id, c.parent_id, c.author_name, c.author_email,
-            c.author_avatar, c.content, c.is_approved, c.created_at, c.updated_at,
-            c.user_id, c.created_at_int, c.updated_at_int,
-            (SELECT COUNT(*) FROM comment_likes WHERE comment_id = c.id) as like_count,
-            (SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END 
-             FROM comment_likes WHERE comment_id = c.id AND user_id = ?) as isLikedByUser
+          SELECT c.*,
+                 COALESCE(COUNT(cl.id), 0) as like_count,
+                 COALESCE(MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END), 0) as isLikedByUser
           FROM comments c
+          LEFT JOIN comment_likes cl ON c.id = cl.comment_id
           WHERE c.parent_id = ? AND c.is_approved = 1
+          GROUP BY c.id
           ORDER BY c.created_at_int ASC, c.created_at ASC
         `,
         args: [user?.id || "", comment.id],
@@ -81,6 +76,8 @@ router.get("/", optionalAuth, validateQuery(commentsQuerySchema), async (req, re
     res.status(500).json({ error: "Failed to fetch comments" });
   }
 });
+
+// POST /api/comments - Create new comment (requires auth)
 router.post(
   "/",
   requireAuth,
