@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { getDatabaseClient } from "../config/database";
 import { z } from "zod";
+import { roleCache } from "../utils/roleCache";
 
 const router = Router();
 
@@ -17,7 +18,7 @@ const createUserSchema = z.object({
 router.post("/", async (req, res) => {
   try {
     const validation = createUserSchema.safeParse(req.body);
-    
+
     if (!validation.success) {
       return res.status(400).json({ error: "Invalid user data", details: validation.error });
     }
@@ -66,25 +67,70 @@ router.post("/", async (req, res) => {
   }
 });
 
-// GET /api/users/:email - Get user by email (for authentication)
+// GET /api/users/:email - Get user by email with 1-hour role caching
 router.get("/:email", async (req, res) => {
   try {
     const { email } = req.params;
+    const decodedEmail = decodeURIComponent(email);
     const client = getDatabaseClient();
 
+    // Check if role is cached (1-hour TTL)
+    const cachedRole = roleCache.get(decodedEmail);
+
+    if (cachedRole !== null) {
+      // Cache hit - fetch user data but use cached role
+      const result = await client.execute({
+        sql: "SELECT id, name, email, avatar_url, provider, provider_id, created_at, updated_at FROM users WHERE email = ?",
+        args: [decodedEmail],
+      });
+
+      if (result.rows.length === 0) {
+        roleCache.invalidate(decodedEmail);
+        return res.json({ user: null });
+      }
+
+      const user = {
+        ...result.rows[0],
+        role: cachedRole,
+      };
+
+      return res.json({ user });
+    }
+
+    // Cache miss - fetch from database and cache the role
     const result = await client.execute({
       sql: "SELECT id, name, email, avatar_url, provider, provider_id, role, created_at, updated_at FROM users WHERE email = ?",
-      args: [decodeURIComponent(email)],
+      args: [decodedEmail],
     });
 
     if (result.rows.length === 0) {
       return res.json({ user: null });
     }
 
-    res.json({ user: result.rows[0] });
+    const user = result.rows[0];
+
+    // Cache the role for 1 hour
+    roleCache.set(decodedEmail, user.role as string);
+
+    res.json({ user });
   } catch (error) {
     console.error("Get user error:", error);
     res.status(500).json({ error: "Failed to fetch user" });
+  }
+});
+
+// POST /api/users/:email/invalidate - Force refresh role cache (called on 401)
+router.post("/:email/invalidate", async (req, res) => {
+  try {
+    const { email } = req.params;
+    const decodedEmail = decodeURIComponent(email);
+
+    roleCache.invalidate(decodedEmail);
+
+    res.json({ success: true, message: "Role cache invalidated" });
+  } catch (error) {
+    console.error("Invalidate cache error:", error);
+    res.status(500).json({ error: "Failed to invalidate cache" });
   }
 });
 
