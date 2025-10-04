@@ -7,6 +7,7 @@ import { validateBody } from "../middleware/validation";
 import { createCommentSchema } from "../middleware/validation";
 import { sanitizeCommentContent } from "../middleware/sanitize";
 
+import { revalidateArticle } from "../utils/revalidate";
 const router = Router();
 
 // GET /api/comments?articleId=xxx
@@ -154,6 +155,30 @@ router.post(
         args: [commentId],
       });
 
+      // Get article category and slug for revalidation
+      const articleResult = await client.execute({
+        sql: `
+          SELECT a.slug, c.slug as category_slug
+          FROM articles a
+          LEFT JOIN categories c ON a.category_id = c.id
+          WHERE a.id = ?
+        `,
+        args: [articleId],
+      });
+
+      // Trigger revalidation asynchronously (don't wait for it)
+      if (articleResult.rows.length > 0) {
+        const article = articleResult.rows[0];
+        const categorySlug = article.category_slug as string | null;
+        const slug = article.slug as string | null;
+        if (categorySlug && slug) {
+          revalidateArticle({
+            category: categorySlug,
+            slug: slug,
+          }).catch(err => console.error("Revalidation error:", err));
+        }
+      }
+
       res.status(201).json({
         success: true,
         comment: commentResult.rows[0],
@@ -189,7 +214,7 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
     });
 
     let action: string;
-    
+
     if (likeCheck.rows.length > 0) {
       // Unlike - remove the like
       await client.execute({
@@ -201,7 +226,6 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
     } else {
       // Like - add the like
       const likeId = `like-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-      const now = Math.floor(Date.now() / 1000);
 
       await client.execute({
         sql: `
@@ -217,7 +241,7 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
     // Get updated like count and user like status
     const likeCountResult = await client.execute({
       sql: `
-        SELECT 
+        SELECT
           COUNT(cl.id) as like_count,
           MAX(CASE WHEN cl.user_id = ? THEN 1 ELSE 0 END) as isLikedByUser
         FROM comment_likes cl
@@ -228,8 +252,33 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
 
     const likeData = likeCountResult.rows[0];
 
-    res.json({ 
-      success: true, 
+    // Get article info for revalidation
+    const articleResult = await client.execute({
+      sql: `
+        SELECT a.slug, cat.slug as category_slug
+        FROM comments c
+        JOIN articles a ON c.article_id = a.id
+        LEFT JOIN categories cat ON a.category_id = cat.id
+        WHERE c.id = ?
+      `,
+      args: [commentId],
+    });
+
+    // Trigger revalidation asynchronously
+    if (articleResult.rows.length > 0) {
+      const article = articleResult.rows[0];
+      const categorySlug = article.category_slug as string | null;
+      const slug = article.slug as string | null;
+      if (categorySlug && slug) {
+        revalidateArticle({
+          category: categorySlug,
+          slug: slug,
+        }).catch(err => console.error("Revalidation error:", err));
+      }
+    }
+
+    res.json({
+      success: true,
       action,
       like_count: Number(likeData?.like_count || 0),
       isLikedByUser: Boolean(likeData?.isLikedByUser || 0)
