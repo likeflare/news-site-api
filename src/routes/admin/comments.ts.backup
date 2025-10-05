@@ -14,25 +14,6 @@ router.use(adminRateLimiter);
 // GET /api/admin/comments - List all comments
 router.get("/", async (req, res) => {
   try {
-
-// DELETE /api/admin/comments - Bulk delete
-router.delete("/", async (req, res) => {
-  try {
-    const { ids } = req.body;
-    if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ error: "IDs array required" });
-    }
-    const client = getDatabaseClient();
-    for (const id of ids) {
-      await client.execute({ sql: "DELETE FROM comments WHERE id = ?", args: [id] });
-    }
-    res.json({ success: true, deleted: ids.length });
-  } catch (error) {
-    console.error("Admin bulk delete comments error:", error);
-    res.status(500).json({ error: "Failed to delete comments" });
-  }
-});
-
     const { limit = "50", offset = "0", approved } = req.query;
     const client = getDatabaseClient();
 

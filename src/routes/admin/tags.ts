@@ -42,6 +42,32 @@ router.post("/", async (req, res) => {
   }
 });
 
+// DELETE /api/admin/tags - Bulk delete
+router.delete("/", async (req, res) => {
+  try {
+    const { ids } = req.body;
+    
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: "IDs array required" });
+    }
+
+    const client = getDatabaseClient();
+
+    // Delete all tags with provided IDs
+    for (const id of ids) {
+      await client.execute({
+        sql: "DELETE FROM tags WHERE id = ?",
+        args: [id],
+      });
+    }
+
+    res.json({ success: true, deleted: ids.length });
+  } catch (error) {
+    console.error("Admin bulk delete tags error:", error);
+    res.status(500).json({ error: "Failed to delete tags" });
+  }
+});
+
 // PUT /api/admin/tags/:id
 router.put("/:id", async (req, res) => {
   try {
@@ -61,7 +87,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// DELETE /api/admin/tags/:id
+// DELETE /api/admin/tags/:id - Single delete
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;

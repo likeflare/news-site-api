@@ -185,26 +185,6 @@ router.post("/", async (req, res) => {
   }
 });
 
-
-// DELETE /api/admin/articles - Bulk delete
-router.delete("/", async (req, res) => {
-  try {
-    const { ids } = req.body;
-    if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ error: "IDs array required" });
-    }
-    const client = getDatabaseClient();
-    for (const id of ids) {
-      await client.execute({ sql: "DELETE FROM article_tags WHERE article_id = ?", args: [id] });
-      await client.execute({ sql: "DELETE FROM articles WHERE id = ?", args: [id] });
-    }
-    res.json({ success: true, deleted: ids.length });
-  } catch (error) {
-    console.error("Admin bulk delete articles error:", error);
-    res.status(500).json({ error: "Failed to delete articles" });
-  }
-});
-
 // PUT /api/admin/articles/:id - Update article
 router.put("/:id", async (req, res) => {
   try {
