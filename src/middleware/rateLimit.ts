@@ -34,3 +34,13 @@ export const adminRateLimiter = rateLimit({
   max: 200, // Increased from 100 to 200
   message: "Too many admin operations, please slow down.",
 });
+
+// Auth brute force protection - very strict
+export const authRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // 5 attempts per 15 minutes
+  message: "Too many authentication attempts, please try again later.",
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true, // Don't count successful logins
+});

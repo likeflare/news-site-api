@@ -214,4 +214,68 @@ router.post("/signout", (req, res) => {
   res.json({ success: true });
 });
 
+
+// Refresh token endpoint - generates new access token from refresh token
+router.post("/refresh", async (req, res) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({ error: "Refresh token required" });
+    }
+
+    // Verify refresh token
+    const decoded = jwt.verify(
+      refreshToken,
+      process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET!
+    ) as any;
+
+    // Validate token type
+    if (decoded.type !== "refresh") {
+      return res.status(401).json({ error: "Invalid token type" });
+    }
+
+    // Fetch fresh user data from database to ensure user still exists and get current role
+    const client = getDatabaseClient();
+    const result = await client.execute({
+      sql: "SELECT id, name, email, avatar_url, role FROM users WHERE id = ? AND email = ?",
+      args: [decoded.sub, decoded.email],
+    });
+
+    if (result.rows.length === 0) {
+      return res.status(401).json({ error: "User not found" });
+    }
+
+    const user = result.rows[0];
+
+    // Generate new access token with current user data
+    const newAccessToken = jwt.sign(
+      {
+        sub: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        image: user.avatar_url,
+        type: "access",
+      },
+      process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET!,
+      { expiresIn: "1h" }
+    );
+
+    res.json({ 
+      accessToken: newAccessToken,
+      expiresIn: 3600 // 1 hour in seconds
+    });
+  } catch (error) {
+    console.error("Token refresh error:", error);
+    if (error instanceof jwt.TokenExpiredError) {
+      return res.status(401).json({ error: "Refresh token expired" });
+    }
+    if (error instanceof jwt.JsonWebTokenError) {
+      return res.status(401).json({ error: "Invalid refresh token" });
+    }
+    res.status(500).json({ error: "Token refresh failed" });
+  }
+});
+
 export default router;
