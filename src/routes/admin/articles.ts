@@ -11,13 +11,13 @@ router.use(adminRateLimiter);
 // GET /api/admin/articles - List all articles with filters
 router.get("/", async (req, res) => {
   try {
-    const { 
-      limit = "50", 
-      offset = "0", 
-      status, 
-      categoryId, 
-      authorId, 
-      search 
+    const {
+      limit = "50",
+      offset = "0",
+      status,
+      categoryId,
+      authorId,
+      search
     } = req.query;
 
     const client = getDatabaseClient();
@@ -101,39 +101,6 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /api/admin/articles/:id - Get single article
-router.get("/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const client = getDatabaseClient();
-
-    const result = await client.execute({
-      sql: "SELECT * FROM articles WHERE id = ?",
-      args: [id],
-    });
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: "Article not found" });
-    }
-
-    // Get tags
-    const tagsResult = await client.execute({
-      sql: `SELECT t.* FROM tags t
-            JOIN article_tags at ON t.id = at.tag_id
-            WHERE at.article_id = ?`,
-      args: [id],
-    });
-
-    res.json({
-      article: result.rows[0],
-      tags: tagsResult.rows,
-    });
-  } catch (error) {
-    console.error("Admin get article error:", error);
-    res.status(500).json({ error: "Failed to fetch article" });
-  }
-});
-
 // POST /api/admin/articles - Create new article
 router.post("/", async (req, res) => {
   try {
@@ -185,6 +152,68 @@ router.post("/", async (req, res) => {
   }
 });
 
+// PUT /api/admin/articles - Update article (ID in body for frontend compatibility)
+router.put("/", async (req, res) => {
+  try {
+    const body = req.body;
+    const id = body.id;
+    
+    if (!id) {
+      return res.status(400).json({ error: "Article ID required in body" });
+    }
+
+    const client = getDatabaseClient();
+    const now = Math.floor(Date.now() / 1000);
+
+    // Update article
+    await client.execute({
+      sql: `UPDATE articles SET
+        title = ?, slug = ?, excerpt = ?, content = ?, tldr = ?,
+        image_url = ?, author_id = ?, category_id = ?, read_time = ?,
+        is_featured = ?, is_published = ?,
+        published_at_int = CASE WHEN ? = 1 AND published_at_int IS NULL THEN ? ELSE published_at_int END,
+        updated_at_int = ?
+      WHERE id = ?`,
+      args: [
+        body.title,
+        body.slug,
+        body.excerpt || null,
+        body.content || null,
+        body.tldr || null,
+        body.image_url || null,
+        body.author_id,
+        body.category_id || null,
+        body.read_time || "5 min",
+        body.is_featured ? 1 : 0,
+        body.is_published ? 1 : 0,
+        body.is_published ? 1 : 0,
+        now,
+        now,
+        id,
+      ],
+    });
+
+    // Update tags - delete old ones and insert new ones
+    if (body.tags) {
+      await client.execute({
+        sql: "DELETE FROM article_tags WHERE article_id = ?",
+        args: [id],
+      });
+
+      for (const tagId of body.tags) {
+        await client.execute({
+          sql: "INSERT INTO article_tags (article_id, tag_id) VALUES (?, ?)",
+          args: [id, tagId],
+        });
+      }
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Admin update article error:", error);
+    res.status(500).json({ error: "Failed to update article" });
+  }
+});
 
 // DELETE /api/admin/articles - Bulk delete
 router.delete("/", async (req, res) => {
@@ -205,7 +234,40 @@ router.delete("/", async (req, res) => {
   }
 });
 
-// PUT /api/admin/articles/:id - Update article
+// GET /api/admin/articles/:id - Get single article
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const client = getDatabaseClient();
+
+    const result = await client.execute({
+      sql: "SELECT * FROM articles WHERE id = ?",
+      args: [id],
+    });
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "Article not found" });
+    }
+
+    // Get tags
+    const tagsResult = await client.execute({
+      sql: `SELECT t.* FROM tags t
+            JOIN article_tags at ON t.id = at.tag_id
+            WHERE at.article_id = ?`,
+      args: [id],
+    });
+
+    res.json({
+      article: result.rows[0],
+      tags: tagsResult.rows,
+    });
+  } catch (error) {
+    console.error("Admin get article error:", error);
+    res.status(500).json({ error: "Failed to fetch article" });
+  }
+});
+
+// PUT /api/admin/articles/:id - Update article (alternative URL pattern)
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;

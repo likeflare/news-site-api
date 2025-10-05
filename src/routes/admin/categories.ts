@@ -39,6 +39,28 @@ router.post("/", async (req, res) => {
   }
 });
 
+// PUT /api/admin/categories - Update category (ID in body for frontend compatibility)
+router.put("/", async (req, res) => {
+  try {
+    const body = req.body;
+    const id = body.id;
+    
+    if (!id) {
+      return res.status(400).json({ error: "Category ID required in body" });
+    }
+
+    const client = getDatabaseClient();
+    await client.execute({
+      sql: `UPDATE categories SET name = ?, slug = ?, description = ?, color = ?, updated_at_int = ? WHERE id = ?`,
+      args: [body.name, body.slug, body.description || null, body.color, Math.floor(Date.now() / 1000), id],
+    });
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Admin update category error:", error);
+    res.status(500).json({ error: "Failed to update category" });
+  }
+});
+
 router.delete("/", async (req, res) => {
   try {
     const { ids } = req.body;
@@ -71,6 +93,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+// PUT /api/admin/categories/:id - Update category (alternative URL pattern)
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;

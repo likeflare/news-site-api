@@ -14,25 +14,6 @@ router.use(adminRateLimiter);
 // GET /api/admin/comments - List all comments
 router.get("/", async (req, res) => {
   try {
-
-// DELETE /api/admin/comments - Bulk delete
-router.delete("/", async (req, res) => {
-  try {
-    const { ids } = req.body;
-    if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      return res.status(400).json({ error: "IDs array required" });
-    }
-    const client = getDatabaseClient();
-    for (const id of ids) {
-      await client.execute({ sql: "DELETE FROM comments WHERE id = ?", args: [id] });
-    }
-    res.json({ success: true, deleted: ids.length });
-  } catch (error) {
-    console.error("Admin bulk delete comments error:", error);
-    res.status(500).json({ error: "Failed to delete comments" });
-  }
-});
-
     const { limit = "50", offset = "0", approved } = req.query;
     const client = getDatabaseClient();
 
@@ -78,7 +59,71 @@ router.delete("/", async (req, res) => {
   }
 });
 
-// PUT /api/admin/comments/:id - Update comment
+// PUT /api/admin/comments - Update comment (ID in body for frontend compatibility)
+router.put("/", validateBody(updateCommentSchema), async (req, res) => {
+  try {
+    const { id, content, is_approved } = req.body;
+    
+    if (!id) {
+      return res.status(400).json({ error: "Comment ID required in body" });
+    }
+
+    const client = getDatabaseClient();
+
+    const updates: string[] = [];
+    const args: any[] = [];
+
+    if (content !== undefined) {
+      updates.push("content = ?");
+      args.push(content);
+    }
+
+    if (is_approved !== undefined) {
+      updates.push("is_approved = ?");
+      args.push(is_approved ? 1 : 0);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: "No updates provided" });
+    }
+
+    updates.push("updated_at = datetime('now')");
+    updates.push("updated_at_int = ?");
+    args.push(Math.floor(Date.now() / 1000));
+
+    args.push(id);
+
+    await client.execute({
+      sql: `UPDATE comments SET ${updates.join(", ")} WHERE id = ?`,
+      args,
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Admin update comment error:", error);
+    res.status(500).json({ error: "Failed to update comment" });
+  }
+});
+
+// DELETE /api/admin/comments - Bulk delete
+router.delete("/", async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: "IDs array required" });
+    }
+    const client = getDatabaseClient();
+    for (const id of ids) {
+      await client.execute({ sql: "DELETE FROM comments WHERE id = ?", args: [id] });
+    }
+    res.json({ success: true, deleted: ids.length });
+  } catch (error) {
+    console.error("Admin bulk delete comments error:", error);
+    res.status(500).json({ error: "Failed to delete comments" });
+  }
+});
+
+// PUT /api/admin/comments/:id - Update comment (alternative URL pattern)
 router.put("/:id", validateBody(updateCommentSchema), async (req, res) => {
   try {
     const { id } = req.params;

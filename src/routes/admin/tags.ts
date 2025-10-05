@@ -42,11 +42,35 @@ router.post("/", async (req, res) => {
   }
 });
 
+// PUT /api/admin/tags - Update tag (ID in body for frontend compatibility)
+router.put("/", async (req, res) => {
+  try {
+    const body = req.body;
+    const id = body.id;
+    
+    if (!id) {
+      return res.status(400).json({ error: "Tag ID required in body" });
+    }
+
+    const client = getDatabaseClient();
+
+    await client.execute({
+      sql: `UPDATE tags SET name = ?, slug = ?, updated_at_int = ? WHERE id = ?`,
+      args: [body.name, body.slug, Math.floor(Date.now() / 1000), id],
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Admin update tag error:", error);
+    res.status(500).json({ error: "Failed to update tag" });
+  }
+});
+
 // DELETE /api/admin/tags - Bulk delete
 router.delete("/", async (req, res) => {
   try {
     const { ids } = req.body;
-    
+
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: "IDs array required" });
     }
@@ -68,7 +92,7 @@ router.delete("/", async (req, res) => {
   }
 });
 
-// PUT /api/admin/tags/:id
+// PUT /api/admin/tags/:id - Update tag (alternative URL pattern)
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;

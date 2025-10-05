@@ -61,6 +61,47 @@ router.post("/", async (req, res) => {
   }
 });
 
+// PUT /api/admin/authors - Update author (ID in body for frontend compatibility)
+router.put("/", async (req, res) => {
+  try {
+    const body = req.body;
+    const id = body.id;
+    
+    if (!id) {
+      return res.status(400).json({ error: "Author ID required in body" });
+    }
+
+    const client = getDatabaseClient();
+
+    await client.execute({
+      sql: `UPDATE authors SET
+        name = ?, slug = ?, title = ?, bio = ?, avatar_url = ?,
+        location = ?, website = ?, twitter_url = ?, linkedin_url = ?,
+        email = ?, expertise = ?, updated_at_int = ?
+      WHERE id = ?`,
+      args: [
+        body.name,
+        body.slug,
+        body.title || null,
+        body.bio || null,
+        body.avatar_url || null,
+        body.location || null,
+        body.website || null,
+        body.twitter_url || null,
+        body.linkedin_url || null,
+        body.email || null,
+        JSON.stringify(body.expertise || []),
+        Math.floor(Date.now() / 1000),
+        id,
+      ],
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error("Admin update author error:", error);
+    res.status(500).json({ error: "Failed to update author" });
+  }
+});
 
 // DELETE /api/admin/authors - Bulk delete
 router.delete("/", async (req, res) => {
@@ -80,7 +121,7 @@ router.delete("/", async (req, res) => {
   }
 });
 
-// PUT /api/admin/authors/:id - Update author
+// PUT /api/admin/authors/:id - Update author (alternative URL pattern)
 router.put("/:id", async (req, res) => {
   try {
     const { id } = req.params;
