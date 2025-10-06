@@ -25,7 +25,7 @@ const createUserSchema = z.object({
  */
 router.post("/", async (req, res) => {
   const startTime = Date.now();
-  
+
   try {
     const validation = createUserSchema.safeParse(req.body);
 
@@ -121,14 +121,14 @@ router.post("/", async (req, res) => {
     return res.status(statusCode).json(responseData);
   } catch (error) {
     console.error("Create user error:", error);
-    
+
     // Even on error, maintain constant timing
     const elapsed = Date.now() - startTime;
     const minimumDelay = 150;
     if (elapsed < minimumDelay) {
       await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
     }
-    
+
     res.status(500).json({ error: "Failed to create user" });
   }
 });
@@ -194,10 +194,14 @@ router.get("/:userId", requireAuth, async (req, res) => {
 /**
  * POST /api/users/lookup/email - Get user ID by email (for internal use)
  *
- * Security: Requires authentication. Returns minimal data (just ID and role for session)
- * This is used by NextAuth callbacks to fetch user data during sign-in
+ * SECURITY FIX: Returns 403 if user tries to lookup email that isn't theirs
+ * This prevents user enumeration by making it impossible for attackers to probe
+ * arbitrary email addresses. Only authenticated users can lookup their own email,
+ * or admins can lookup any email.
  */
 router.post("/lookup/email", requireAuth, async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     const { email } = req.body;
     const currentUser = (req as any).user;
@@ -206,8 +210,15 @@ router.post("/lookup/email", requireAuth, async (req, res) => {
       return res.status(400).json({ error: "Email required" });
     }
 
-    // Only allow users to lookup their own email, or admins to lookup any email
+    // SECURITY FIX: Only allow users to lookup their own email (prevents enumeration)
+    // Admins can lookup any email
     if (currentUser.email !== email && currentUser.role !== "admin") {
+      // SECURITY: Add timing delay even for unauthorized requests
+      const elapsed = Date.now() - startTime;
+      const minimumDelay = 100;
+      if (elapsed < minimumDelay) {
+        await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+      }
       return res.status(403).json({ error: "Access denied" });
     }
 
@@ -225,7 +236,22 @@ router.post("/lookup/email", requireAuth, async (req, res) => {
 
       if (result.rows.length === 0) {
         roleCache.invalidate(email);
+        
+        // SECURITY: Add timing delay for consistency
+        const elapsed = Date.now() - startTime;
+        const minimumDelay = 100;
+        if (elapsed < minimumDelay) {
+          await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+        }
+        
         return res.json({ user: null });
+      }
+
+      // SECURITY: Add timing delay for consistency
+      const elapsed = Date.now() - startTime;
+      const minimumDelay = 100;
+      if (elapsed < minimumDelay) {
+        await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
       }
 
       return res.json({
@@ -244,11 +270,25 @@ router.post("/lookup/email", requireAuth, async (req, res) => {
     });
 
     if (result.rows.length === 0) {
+      // SECURITY: Add timing delay for consistency
+      const elapsed = Date.now() - startTime;
+      const minimumDelay = 100;
+      if (elapsed < minimumDelay) {
+        await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+      }
+      
       return res.json({ user: null });
     }
 
     const user = result.rows[0];
     roleCache.set(email, user.role as string);
+
+    // SECURITY: Add timing delay for consistency
+    const elapsed = Date.now() - startTime;
+    const minimumDelay = 100;
+    if (elapsed < minimumDelay) {
+      await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+    }
 
     res.json({
       user: {
@@ -259,6 +299,14 @@ router.post("/lookup/email", requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error("Email lookup error:", error);
+    
+    // SECURITY: Add timing delay even for errors
+    const elapsed = Date.now() - startTime;
+    const minimumDelay = 100;
+    if (elapsed < minimumDelay) {
+      await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+    }
+    
     res.status(500).json({ error: "Failed to lookup user" });
   }
 });

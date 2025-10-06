@@ -60,6 +60,7 @@ router.get("/", async (req, res) => {
 });
 
 // PUT /api/admin/comments - Update comment (ID in body for frontend compatibility)
+// SECURITY: Uses explicit parameterized queries to prevent SQL injection
 router.put("/", validateBody(updateCommentSchema), async (req, res) => {
   try {
     const { id, content, is_approved } = req.body;
@@ -69,34 +70,31 @@ router.put("/", validateBody(updateCommentSchema), async (req, res) => {
     }
 
     const client = getDatabaseClient();
+    const now = Math.floor(Date.now() / 1000);
 
-    const updates: string[] = [];
-    const args: any[] = [];
-
-    if (content !== undefined) {
-      updates.push("content = ?");
-      args.push(content);
-    }
-
-    if (is_approved !== undefined) {
-      updates.push("is_approved = ?");
-      args.push(is_approved ? 1 : 0);
-    }
-
-    if (updates.length === 0) {
+    // SECURITY FIX: Use explicit conditional query instead of dynamic string building
+    // This ensures only whitelisted fields can be updated
+    if (content !== undefined && is_approved !== undefined) {
+      // Both fields provided
+      await client.execute({
+        sql: `UPDATE comments SET content = ?, is_approved = ?, updated_at = datetime('now'), updated_at_int = ? WHERE id = ?`,
+        args: [content, is_approved ? 1 : 0, now, id],
+      });
+    } else if (content !== undefined) {
+      // Only content provided
+      await client.execute({
+        sql: `UPDATE comments SET content = ?, updated_at = datetime('now'), updated_at_int = ? WHERE id = ?`,
+        args: [content, now, id],
+      });
+    } else if (is_approved !== undefined) {
+      // Only approval status provided
+      await client.execute({
+        sql: `UPDATE comments SET is_approved = ?, updated_at = datetime('now'), updated_at_int = ? WHERE id = ?`,
+        args: [is_approved ? 1 : 0, now, id],
+      });
+    } else {
       return res.status(400).json({ error: "No updates provided" });
     }
-
-    updates.push("updated_at = datetime('now')");
-    updates.push("updated_at_int = ?");
-    args.push(Math.floor(Date.now() / 1000));
-
-    args.push(id);
-
-    await client.execute({
-      sql: `UPDATE comments SET ${updates.join(", ")} WHERE id = ?`,
-      args,
-    });
 
     res.json({ success: true });
   } catch (error) {
@@ -141,39 +139,33 @@ router.delete("/", async (req, res) => {
 });
 
 // PUT /api/admin/comments/:id - Update comment (alternative URL pattern)
+// SECURITY: Uses explicit parameterized queries
 router.put("/:id", validateBody(updateCommentSchema), async (req, res) => {
   try {
     const { id } = req.params;
     const { content, is_approved } = req.body;
     const client = getDatabaseClient();
+    const now = Math.floor(Date.now() / 1000);
 
-    const updates: string[] = [];
-    const args: any[] = [];
-
-    if (content !== undefined) {
-      updates.push("content = ?");
-      args.push(content);
-    }
-
-    if (is_approved !== undefined) {
-      updates.push("is_approved = ?");
-      args.push(is_approved ? 1 : 0);
-    }
-
-    if (updates.length === 0) {
+    // SECURITY FIX: Use explicit conditional query instead of dynamic string building
+    if (content !== undefined && is_approved !== undefined) {
+      await client.execute({
+        sql: `UPDATE comments SET content = ?, is_approved = ?, updated_at = datetime('now'), updated_at_int = ? WHERE id = ?`,
+        args: [content, is_approved ? 1 : 0, now, id],
+      });
+    } else if (content !== undefined) {
+      await client.execute({
+        sql: `UPDATE comments SET content = ?, updated_at = datetime('now'), updated_at_int = ? WHERE id = ?`,
+        args: [content, now, id],
+      });
+    } else if (is_approved !== undefined) {
+      await client.execute({
+        sql: `UPDATE comments SET is_approved = ?, updated_at = datetime('now'), updated_at_int = ? WHERE id = ?`,
+        args: [is_approved ? 1 : 0, now, id],
+      });
+    } else {
       return res.status(400).json({ error: "No updates provided" });
     }
-
-    updates.push("updated_at = datetime('now')");
-    updates.push("updated_at_int = ?");
-    args.push(Math.floor(Date.now() / 1000));
-
-    args.push(id);
-
-    await client.execute({
-      sql: `UPDATE comments SET ${updates.join(", ")} WHERE id = ?`,
-      args,
-    });
 
     res.json({ success: true });
   } catch (error) {
