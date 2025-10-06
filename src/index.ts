@@ -32,6 +32,10 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+
+// Trust proxy for Fly.io deployment (required for rate limiting with X-Forwarded-For)
+app.set("trust proxy", true);
+
 // SECURITY: Strict CORS configuration
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000").split(",");
 
