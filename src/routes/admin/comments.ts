@@ -105,24 +105,35 @@ router.put("/", validateBody(updateCommentSchema), async (req, res) => {
   }
 });
 
-// DELETE /api/admin/comments - Bulk delete
+// DELETE /api/admin/comments - Bulk delete (accepts both {ids: [...]} and {id: "..."})
 router.delete("/", async (req, res) => {
   try {
-    console.log("🔍 DELETE / handler - req.body:", JSON.stringify(req.body));
-    console.log("🔍 DELETE / handler - typeof req.body:", typeof req.body);
-    console.log("🔍 DELETE / handler - ids:", req.body.ids);
+    const { ids, id } = req.body;
     
-    const { ids } = req.body;
-    if (!ids || !Array.isArray(ids) || ids.length === 0) {
-      console.log("❌ DELETE / handler - validation failed:", { ids, isArray: Array.isArray(ids), length: ids?.length });
+    // Accept both formats: {ids: [...]} or {id: "..."}
+    let idsArray: string[] = [];
+    
+    if (ids && Array.isArray(ids)) {
+      idsArray = ids;
+    } else if (id && typeof id === "string") {
+      idsArray = [id];
+    } else if (ids && typeof ids === "string") {
+      idsArray = [ids];
+    }
+    
+    if (idsArray.length === 0) {
+      console.log("❌ DELETE validation failed - no valid IDs:", { ids, id, body: req.body });
       return res.status(400).json({ error: "IDs array required" });
     }
+    
+    console.log("✅ DELETE processing IDs:", idsArray);
+    
     const client = getDatabaseClient();
-    for (const id of ids) {
-      await client.execute({ sql: "DELETE FROM comments WHERE id = ?", args: [id] });
+    for (const commentId of idsArray) {
+      await client.execute({ sql: "DELETE FROM comments WHERE id = ?", args: [commentId] });
     }
-    console.log("✅ DELETE / handler - success, deleted:", ids.length);
-    res.json({ success: true, deleted: ids.length });
+    
+    res.json({ success: true, deleted: idsArray.length });
   } catch (error) {
     console.error("Admin bulk delete comments error:", error);
     res.status(500).json({ error: "Failed to delete comments" });
