@@ -22,15 +22,15 @@ router.get("/", optionalAuth, validateQuery(commentsQuerySchema), async (req, re
     const client = getDatabaseClient();
 
     // Fetch top-level comments
-    // NOTE: We select individual columns (not c.*) to avoid column name conflict with like_count
+    // SECURITY: Do NOT expose author_email in public responses
     const result = await client.execute({
       sql: `
-        SELECT 
-          c.id, c.article_id, c.parent_id, c.author_name, c.author_email, 
+        SELECT
+          c.id, c.article_id, c.parent_id, c.author_name,
           c.author_avatar, c.content, c.is_approved, c.created_at, c.updated_at,
           c.user_id, c.created_at_int, c.updated_at_int,
           (SELECT COUNT(*) FROM comment_likes WHERE comment_id = c.id) as like_count,
-          (SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END 
+          (SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END
            FROM comment_likes WHERE comment_id = c.id AND user_id = ?) as isLikedByUser
         FROM comments c
         WHERE c.article_id = ? AND c.parent_id IS NULL AND c.is_approved = 1
@@ -49,15 +49,15 @@ router.get("/", optionalAuth, validateQuery(commentsQuerySchema), async (req, re
         replies: [],
       };
 
-      // Fetch replies
+      // Fetch replies - also exclude author_email
       const repliesResult = await client.execute({
         sql: `
-          SELECT 
-            c.id, c.article_id, c.parent_id, c.author_name, c.author_email,
+          SELECT
+            c.id, c.article_id, c.parent_id, c.author_name,
             c.author_avatar, c.content, c.is_approved, c.created_at, c.updated_at,
             c.user_id, c.created_at_int, c.updated_at_int,
             (SELECT COUNT(*) FROM comment_likes WHERE comment_id = c.id) as like_count,
-            (SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END 
+            (SELECT CASE WHEN COUNT(*) > 0 THEN 1 ELSE 0 END
              FROM comment_likes WHERE comment_id = c.id AND user_id = ?) as isLikedByUser
           FROM comments c
           WHERE c.parent_id = ? AND c.is_approved = 1
@@ -81,6 +81,8 @@ router.get("/", optionalAuth, validateQuery(commentsQuerySchema), async (req, re
     res.status(500).json({ error: "Failed to fetch comments" });
   }
 });
+
+// POST /api/comments - Create new comment (requires auth)
 router.post(
   "/",
   requireAuth,
@@ -126,11 +128,11 @@ router.post(
       const commentId = `comment-${Date.now()}-${Math.random().toString(36).substring(7)}`;
       const now = Math.floor(Date.now() / 1000);
 
-      // Insert comment
+      // Insert comment - store user_id instead of email for privacy
       await client.execute({
         sql: `
           INSERT INTO comments (
-            id, article_id, parent_id, author_name, author_email,
+            id, article_id, parent_id, user_id, author_name,
             author_avatar, content, like_count, is_approved,
             created_at, updated_at, created_at_int, updated_at_int
           ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 1, datetime('now'), datetime('now'), ?, ?)
@@ -139,8 +141,8 @@ router.post(
           commentId,
           articleId,
           parentId || null,
-          user.name,
           user.id,
+          user.name,
           user.image || null,
           sanitizedContent,
           now,
@@ -148,13 +150,16 @@ router.post(
         ],
       });
 
-      // Fetch the created comment
+      // Fetch the created comment - exclude email
       const commentResult = await client.execute({
-        sql: "SELECT * FROM comments WHERE id = ?",
+        sql: `SELECT 
+          id, article_id, parent_id, author_name, author_avatar, 
+          content, is_approved, created_at, updated_at, user_id,
+          created_at_int, updated_at_int, like_count
+        FROM comments WHERE id = ?`,
         args: [commentId],
       });
 
-      // Get article category and slug for revalidation
       res.status(201).json({
         success: true,
         comment: commentResult.rows[0],
@@ -227,7 +232,6 @@ router.post("/:commentId/like", requireAuth, async (req, res) => {
     });
 
     const likeData = likeCountResult.rows[0];
-
 
     res.json({
       success: true,

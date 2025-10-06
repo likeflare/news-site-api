@@ -1,8 +1,8 @@
 import { Router } from "express";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
-import jwt from "jsonwebtoken";
 import { getDatabaseClient } from "../config/database";
+import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from "../utils/tokens";
 
 const router = Router();
 
@@ -13,14 +13,14 @@ function getFrontendUrl(req: any): string {
   if (referer) {
     const url = new URL(referer);
     const origin = `${url.protocol}//${url.host}`;
-    
+
     // Verify it's an allowed origin
     const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',');
     if (allowedOrigins.includes(origin)) {
       return origin;
     }
   }
-  
+
   // Check Origin header
   const origin = req.get('origin');
   if (origin) {
@@ -29,7 +29,7 @@ function getFrontendUrl(req: any): string {
       return origin;
     }
   }
-  
+
   // Check X-Forwarded-Host header
   const forwardedHost = req.get('x-forwarded-host');
   const forwardedProto = req.get('x-forwarded-proto') || 'https';
@@ -40,7 +40,7 @@ function getFrontendUrl(req: any): string {
       return forwardedOrigin;
     }
   }
-  
+
   // Default to first allowed origin
   const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',');
   return allowedOrigins[0];
@@ -120,10 +120,10 @@ passport.deserializeUser((user: any, done) => {
 // Store the frontend URL in session/state during OAuth initiation
 router.get("/google", (req, res, next) => {
   const frontendUrl = getFrontendUrl(req);
-  
+
   // Store frontend URL in state parameter
   const state = Buffer.from(JSON.stringify({ frontendUrl })).toString('base64');
-  
+
   passport.authenticate("google", {
     scope: ["profile", "email"],
     session: false,
@@ -139,21 +139,25 @@ router.get(
     try {
       const user = req.user as any;
 
-      // Generate JWT token
-      const token = jwt.sign(
-        {
-          sub: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-        },
-        process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET!,
-        { expiresIn: "7d" }
-      );
+      // SECURITY: Generate separate access and refresh tokens with different secrets
+      const accessToken = generateAccessToken({
+        sub: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        image: user.avatar_url,
+      });
+
+      const refreshToken = generateRefreshToken({
+        sub: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+      });
 
       // Get frontend URL from state parameter or fallback
       let frontendUrl = "http://localhost:3000";
-      
+
       try {
         const state = req.query.state as string;
         if (state) {
@@ -167,8 +171,8 @@ router.get(
         frontendUrl = getFrontendUrl(req);
       }
 
-      // Redirect to frontend with token
-      res.redirect(`${frontendUrl}/auth/callback?token=${token}`);
+      // Redirect to frontend with both tokens
+      res.redirect(`${frontendUrl}/auth/callback?token=${accessToken}&refreshToken=${refreshToken}`);
     } catch (error) {
       console.error("Callback error:", error);
       const frontendUrl = getFrontendUrl(req);
@@ -186,7 +190,9 @@ router.get("/me", async (req, res) => {
     }
 
     const token = authHeader.substring(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET!) as any;
+    
+    // Use secure token verification with access token secret
+    const decoded = verifyAccessToken(token);
 
     // Fetch fresh user data from database
     const client = getDatabaseClient();
@@ -202,10 +208,7 @@ router.get("/me", async (req, res) => {
     res.json({ user: result.rows[0] });
   } catch (error) {
     console.error("Get user error:", error);
-    if (error instanceof jwt.JsonWebTokenError) {
-      return res.status(401).json({ error: "Invalid token" });
-    }
-    res.status(500).json({ error: "Failed to get user" });
+    return res.status(401).json({ error: "Invalid or expired token" });
   }
 });
 
@@ -214,8 +217,7 @@ router.post("/signout", (req, res) => {
   res.json({ success: true });
 });
 
-
-// Refresh token endpoint - generates new access token from refresh token
+// SECURITY: Refresh token endpoint with separate secret verification
 router.post("/refresh", async (req, res) => {
   try {
     const { refreshToken } = req.body;
@@ -224,16 +226,8 @@ router.post("/refresh", async (req, res) => {
       return res.status(400).json({ error: "Refresh token required" });
     }
 
-    // Verify refresh token
-    const decoded = jwt.verify(
-      refreshToken,
-      process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET!
-    ) as any;
-
-    // Validate token type
-    if (decoded.type !== "refresh") {
-      return res.status(401).json({ error: "Invalid token type" });
-    }
+    // Verify refresh token with separate secret
+    const decoded = verifyRefreshToken(refreshToken);
 
     // Fetch fresh user data from database to ensure user still exists and get current role
     const client = getDatabaseClient();
@@ -248,33 +242,22 @@ router.post("/refresh", async (req, res) => {
 
     const user = result.rows[0];
 
-    // Generate new access token with current user data
-    const newAccessToken = jwt.sign(
-      {
-        sub: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        image: user.avatar_url,
-        type: "access",
-      },
-      process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET!,
-      { expiresIn: "1h" }
-    );
+    // Generate new access token with access token secret
+    const newAccessToken = generateAccessToken({
+      sub: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      image: user.avatar_url,
+    });
 
-    res.json({ 
+    res.json({
       accessToken: newAccessToken,
       expiresIn: 3600 // 1 hour in seconds
     });
   } catch (error) {
     console.error("Token refresh error:", error);
-    if (error instanceof jwt.TokenExpiredError) {
-      return res.status(401).json({ error: "Refresh token expired" });
-    }
-    if (error instanceof jwt.JsonWebTokenError) {
-      return res.status(401).json({ error: "Invalid refresh token" });
-    }
-    res.status(500).json({ error: "Token refresh failed" });
+    return res.status(401).json({ error: "Invalid or expired refresh token" });
   }
 });
 

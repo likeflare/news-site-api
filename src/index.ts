@@ -32,18 +32,41 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// CORS configuration
+// SECURITY: Strict CORS configuration
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000").split(",");
 
-// CORS configuration with Next.js build support
 app.use((req, res, next) => {
   const origin = req.get("origin");
   const userAgent = req.get("user-agent") || "";
-  
-  // Allow Next.js server-side builds (no origin header from server-to-server calls)
-  if (!origin && (userAgent.includes("Next.js") || userAgent.includes("node") || process.env.NODE_ENV !== "production")) {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Credentials", "true");
+
+  // SECURITY FIX: Strict origin validation - no wildcards with credentials
+  // Special handling for Next.js SSR/Build (server-to-server requests have no origin)
+  if (!origin) {
+    // Allow server-side requests from known build servers only
+    const forwardedFor = req.get("x-forwarded-for");
+    const host = req.get("host");
+    
+    // In production, validate server-side requests more strictly
+    if (process.env.NODE_ENV === "production") {
+      // Only allow if it's from our own backend or known build infrastructure
+      if (host?.includes("fly.dev") || userAgent.includes("Next.js")) {
+        res.header("Access-Control-Allow-Origin", allowedOrigins[0]);
+        res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+        
+        if (req.method === "OPTIONS") {
+          return res.sendStatus(200);
+        }
+        return next();
+      }
+      
+      // Block unknown server-side requests in production
+      return res.status(403).json({ error: "Origin required" });
+    }
+    
+    // Development: Allow server-side requests but log them
+    console.log(`[CORS] Server-side request from ${userAgent} - ${req.method} ${req.path}`);
+    res.header("Access-Control-Allow-Origin", allowedOrigins[0]);
     res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
     
@@ -52,37 +75,50 @@ app.use((req, res, next) => {
     }
     return next();
   }
-  
-  // Standard CORS for browser requests
-  cors({
-    origin: (origin, callback) => {
-      if (!origin) {
-        return callback(new Error("Origin header required"));
-      }
-      if (allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    credentials: true,
-  })(req, res, next);
+
+  // Standard CORS for browser requests with strict origin checking
+  if (allowedOrigins.includes(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
+    return next();
+  }
+
+  // Block requests from unknown origins
+  console.warn(`[CORS] Blocked request from unauthorized origin: ${origin}`);
+  return res.status(403).json({ error: "Not allowed by CORS" });
 });
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+}));
 
-// Body parsing
-app.use(express.json({ limit: "1mb" })); // Reduced for security
+// Body parsing with size limits
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 // Passport initialization
 app.use(passport.initialize());
-app.use(express.urlencoded({ extended: true, limit: "1mb" })); // Reduced for security
 
 // Global rate limiting
 app.use(globalRateLimiter);
 
-// Debug logging
+// Request logging
 app.use((req, res, next) => {
   console.log(`📥 ${req.method} ${req.path}`);
   next();
@@ -174,6 +210,7 @@ async function start() {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📝 Environment: ${process.env.NODE_ENV || "development"}`);
       console.log(`🌐 Allowed origins: ${allowedOrigins.join(", ")}`);
+      console.log(`🔒 CORS: Strict mode enabled (no wildcards with credentials)`);
       console.log(`\n📡 Available endpoints:`);
       console.log(`   Public:`);
       console.log(`   - GET  /api/articles`);

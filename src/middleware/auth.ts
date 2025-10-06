@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
+import { verifyAccessToken } from "../utils/tokens";
 
 export interface JWTPayload {
   sub?: string;  // User ID
@@ -7,14 +7,6 @@ export interface JWTPayload {
   name?: string;
   role?: string;
   image?: string; // User avatar
-}
-
-function getJWTSecret(): string {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) {
-    throw new Error("JWT_SECRET environment variable is required");
-  }
-  return secret;
 }
 
 export function verifyToken(req: Request, res: Response, next: NextFunction) {
@@ -27,7 +19,8 @@ export function verifyToken(req: Request, res: Response, next: NextFunction) {
   const token = authHeader.substring(7); // Remove "Bearer " prefix
 
   try {
-    const decoded = jwt.verify(token, getJWTSecret()) as JWTPayload;
+    // SECURITY: Use separate access token secret for verification
+    const decoded = verifyAccessToken(token);
 
     // Attach user info to request
     (req as any).user = {
@@ -74,7 +67,7 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction) {
   const token = authHeader.substring(7);
 
   try {
-    const decoded = jwt.verify(token, getJWTSecret()) as JWTPayload;
+    const decoded = verifyAccessToken(token);
 
     (req as any).user = {
       id: decoded.sub || "",

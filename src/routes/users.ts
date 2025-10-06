@@ -19,11 +19,13 @@ const createUserSchema = z.object({
 
 /**
  * POST /api/users - Create new user (called by NextAuth during sign-in)
- * 
+ *
  * Security: Requires server-side secret token to prevent unauthorized user creation
- * The secret should only be known to the NextAuth server
+ * SECURITY FIX: Constant-time response to prevent user enumeration via timing attacks
  */
 router.post("/", async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     const validation = createUserSchema.safeParse(req.body);
 
@@ -32,7 +34,7 @@ router.post("/", async (req, res) => {
     }
 
     const { email, name, avatar_url, provider, provider_id, auth_secret } = validation.data;
-    
+
     // Verify server-side secret token
     const expectedSecret = process.env.USER_CREATION_SECRET;
     if (!expectedSecret) {
@@ -59,12 +61,15 @@ router.post("/", async (req, res) => {
       args: [email],
     });
 
+    let responseData;
+    let statusCode;
+
     if (existingUser.rows.length > 0) {
-      // User exists - return existing user data (useful for NextAuth callback)
+      // User exists - return existing user data
       const user = existingUser.rows[0];
       roleCache.set(email, user.role as string);
-      
-      return res.status(200).json({
+
+      responseData = {
         success: true,
         user: {
           id: user.id,
@@ -72,45 +77,65 @@ router.post("/", async (req, res) => {
           role: user.role,
         },
         existed: true,
+      };
+      statusCode = 200;
+    } else {
+      // Generate user ID
+      const userId = `user-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+      const now = Math.floor(Date.now() / 1000);
+
+      // Create user with default 'user' role
+      await client.execute({
+        sql: `
+          INSERT INTO users (
+            id, name, email, avatar_url, provider, provider_id, role,
+            created_at, updated_at, created_at_int, updated_at_int
+          ) VALUES (?, ?, ?, ?, ?, ?, 'user', datetime('now'), datetime('now'), ?, ?)
+        `,
+        args: [userId, name, email, avatar_url || null, provider, provider_id, now, now],
       });
+
+      // Cache the role
+      roleCache.set(email, "user");
+
+      responseData = {
+        success: true,
+        user: {
+          id: userId,
+          email: email,
+          role: "user",
+        },
+        existed: false,
+      };
+      statusCode = 201;
     }
 
-    // Generate user ID
-    const userId = `user-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-    const now = Math.floor(Date.now() / 1000);
+    // SECURITY: Add constant-time delay to prevent timing attacks
+    // Ensure total response time is at least 150ms regardless of path taken
+    const elapsed = Date.now() - startTime;
+    const minimumDelay = 150;
+    if (elapsed < minimumDelay) {
+      await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+    }
 
-    // Create user with default 'user' role
-    await client.execute({
-      sql: `
-        INSERT INTO users (
-          id, name, email, avatar_url, provider, provider_id, role,
-          created_at, updated_at, created_at_int, updated_at_int
-        ) VALUES (?, ?, ?, ?, ?, ?, 'user', datetime('now'), datetime('now'), ?, ?)
-      `,
-      args: [userId, name, email, avatar_url || null, provider, provider_id, now, now],
-    });
-
-    // Cache the role
-    roleCache.set(email, "user");
-
-    res.status(201).json({
-      success: true,
-      user: {
-        id: userId,
-        email: email,
-        role: "user",
-      },
-      existed: false,
-    });
+    return res.status(statusCode).json(responseData);
   } catch (error) {
     console.error("Create user error:", error);
+    
+    // Even on error, maintain constant timing
+    const elapsed = Date.now() - startTime;
+    const minimumDelay = 150;
+    if (elapsed < minimumDelay) {
+      await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+    }
+    
     res.status(500).json({ error: "Failed to create user" });
   }
 });
 
 /**
  * GET /api/users/me - Get current authenticated user's data
- * 
+ *
  * Security: User can only access their own data
  */
 router.get("/me", requireAuth, async (req, res) => {
@@ -136,7 +161,7 @@ router.get("/me", requireAuth, async (req, res) => {
 
 /**
  * GET /api/users/:userId - Get user by ID
- * 
+ *
  * Security: Users can only access their own data, admins can access any user
  */
 router.get("/:userId", requireAuth, async (req, res) => {
@@ -167,8 +192,8 @@ router.get("/:userId", requireAuth, async (req, res) => {
 });
 
 /**
- * GET /api/users/lookup/email - Get user ID by email (for internal use)
- * 
+ * POST /api/users/lookup/email - Get user ID by email (for internal use)
+ *
  * Security: Requires authentication. Returns minimal data (just ID and role for session)
  * This is used by NextAuth callbacks to fetch user data during sign-in
  */
@@ -240,7 +265,7 @@ router.post("/lookup/email", requireAuth, async (req, res) => {
 
 /**
  * GET /api/users - List all users (admin only)
- * 
+ *
  * Security: Requires admin role
  */
 router.get("/", requireAdmin, async (req, res) => {
@@ -271,13 +296,13 @@ router.get("/", requireAdmin, async (req, res) => {
 
 /**
  * POST /api/users/invalidate-cache - Force refresh role cache
- * 
+ *
  * Security: Requires authentication. Users can only invalidate their own cache
  */
 router.post("/invalidate-cache", requireAuth, async (req, res) => {
   try {
     const currentUser = (req as any).user;
-    
+
     roleCache.invalidate(currentUser.email);
 
     res.json({ success: true, message: "Role cache invalidated" });
