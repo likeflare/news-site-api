@@ -2,7 +2,7 @@ import { Router } from "express";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { getDatabaseClient } from "../config/database";
-import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from "../utils/tokens";
+import { generateAccessToken, generateRefreshToken, verifyRefreshToken, verifyAccessToken } from "../utils/tokens";
 
 const router = Router();
 
@@ -240,15 +240,15 @@ router.post("/refresh", async (req, res) => {
       return res.status(401).json({ error: "User not found" });
     }
 
-    const user = result.rows[0];
+    const user = result.rows[0] as any;
 
     // Generate new access token with access token secret
     const newAccessToken = generateAccessToken({
-      sub: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      image: user.avatar_url,
+      sub: user.id as string,
+      email: user.email as string,
+      name: user.name as string,
+      role: user.role as string,
+      image: user.avatar_url as string,
     });
 
     res.json({
