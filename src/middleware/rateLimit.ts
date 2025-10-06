@@ -1,5 +1,19 @@
 import rateLimit from "express-rate-limit";
 
+/**
+ * SECURITY: Custom key generator for Fly.io proxy setup
+ * Uses fly-client-ip header which contains the real client IP
+ * Falls back to req.ip if header not present
+ */
+function getClientIp(req: any): string {
+  // Fly.io sets this header with the real client IP
+  const flyClientIp = req.get("fly-client-ip");
+  if (flyClientIp) return flyClientIp;
+  
+  // Fallback to Express req.ip (which uses X-Forwarded-For)
+  return req.ip || "unknown";
+}
+
 // Global rate limiter - increased for build process
 export const globalRateLimiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || "60000"), // 1 minute
@@ -7,10 +21,15 @@ export const globalRateLimiter = rateLimit({
   message: "Too many requests from this IP, please try again later.",
   standardHeaders: true,
   legacyHeaders: false,
-  // Skip rate limiting for same IP making many different requests (like during build)
+  // SECURITY FIX: Use custom key generator to properly handle Fly.io proxy
+  keyGenerator: getClientIp,
+  // Skip rate limiting for health checks
   skip: (req) => {
-    // Skip rate limiting for health checks
     return req.path === '/health';
+  },
+  // Disable trust proxy validation (we handle it with custom key generator)
+  validate: {
+    trustProxy: false,
   },
 });
 
@@ -19,6 +38,10 @@ export const writeRateLimiter = rateLimit({
   windowMs: 60000, // 1 minute
   max: 20, // Increased from 10 to 20
   message: "Too many write operations, please slow down.",
+  keyGenerator: getClientIp,
+  validate: {
+    trustProxy: false,
+  },
 });
 
 // Comment creation rate limiter
@@ -26,6 +49,10 @@ export const commentRateLimiter = rateLimit({
   windowMs: 60000, // 1 minute
   max: 5, // 5 comments per minute
   message: "Too many comments, please wait before posting again.",
+  keyGenerator: getClientIp,
+  validate: {
+    trustProxy: false,
+  },
 });
 
 // Admin operations rate limiter
@@ -33,6 +60,10 @@ export const adminRateLimiter = rateLimit({
   windowMs: 60000, // 1 minute
   max: 200, // Increased from 100 to 200
   message: "Too many admin operations, please slow down.",
+  keyGenerator: getClientIp,
+  validate: {
+    trustProxy: false,
+  },
 });
 
 // Auth brute force protection - very strict
@@ -43,4 +74,8 @@ export const authRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true, // Don't count successful logins
+  keyGenerator: getClientIp,
+  validate: {
+    trustProxy: false,
+  },
 });

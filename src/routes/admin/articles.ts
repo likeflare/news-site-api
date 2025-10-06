@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getDatabaseClient } from "../../config/database";
 import { requireAdmin } from "../../middleware/auth";
 import { adminRateLimiter } from "../../middleware/rateLimit";
+import { sanitizeArticleContent, sanitizeText } from "../../middleware/sanitize";
 
 const router = Router();
 
@@ -107,6 +108,11 @@ router.post("/", async (req, res) => {
     const body = req.body;
     const client = getDatabaseClient();
 
+    // SECURITY: Sanitize content while preserving formatting
+    const sanitizedContent = body.content ? sanitizeArticleContent(body.content) : null;
+    const sanitizedExcerpt = body.excerpt ? sanitizeText(body.excerpt) : null;
+    const sanitizedTldr = body.tldr ? sanitizeText(body.tldr) : null;
+
     const id = `article-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     const now = Math.floor(Date.now() / 1000);
 
@@ -120,9 +126,9 @@ router.post("/", async (req, res) => {
         id,
         body.title,
         body.slug,
-        body.excerpt || null,
-        body.content || null,
-        body.tldr || null,
+        sanitizedExcerpt,
+        sanitizedContent,
+        sanitizedTldr,
         body.image_url || null,
         body.author_id,
         body.category_id || null,
@@ -157,10 +163,15 @@ router.put("/", async (req, res) => {
   try {
     const body = req.body;
     const id = body.id;
-    
+
     if (!id) {
       return res.status(400).json({ error: "Article ID required in body" });
     }
+
+    // SECURITY: Sanitize content while preserving formatting
+    const sanitizedContent = body.content ? sanitizeArticleContent(body.content) : null;
+    const sanitizedExcerpt = body.excerpt ? sanitizeText(body.excerpt) : null;
+    const sanitizedTldr = body.tldr ? sanitizeText(body.tldr) : null;
 
     const client = getDatabaseClient();
     const now = Math.floor(Date.now() / 1000);
@@ -177,9 +188,9 @@ router.put("/", async (req, res) => {
       args: [
         body.title,
         body.slug,
-        body.excerpt || null,
-        body.content || null,
-        body.tldr || null,
+        sanitizedExcerpt,
+        sanitizedContent,
+        sanitizedTldr,
         body.image_url || null,
         body.author_id,
         body.category_id || null,
@@ -215,33 +226,75 @@ router.put("/", async (req, res) => {
   }
 });
 
-// DELETE /api/admin/articles - Bulk delete
+// DELETE /api/admin/articles - Delete articles (accepts both {ids: [...]} and {id: "..."})
 router.delete("/", async (req, res) => {
   try {
-    const { ids } = req.body;
-    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+    const { ids, id } = req.body;
+
+    // Accept both formats: {ids: [...]} or {id: "..."}
+    let idsArray: string[] = [];
+
+    if (ids && Array.isArray(ids)) {
+      idsArray = ids;
+    } else if (id && typeof id === "string") {
+      idsArray = [id];
+    } else if (ids && typeof ids === "string") {
+      idsArray = [ids];
+    }
+
+    if (idsArray.length === 0) {
       return res.status(400).json({ error: "IDs array required" });
     }
+
     const client = getDatabaseClient();
-    for (const id of ids) {
-      await client.execute({ sql: "DELETE FROM article_tags WHERE article_id = ?", args: [id] });
-      await client.execute({ sql: "DELETE FROM articles WHERE id = ?", args: [id] });
+
+    for (const articleId of idsArray) {
+      // Delete associated data
+      await client.execute({
+        sql: "DELETE FROM article_tags WHERE article_id = ?",
+        args: [articleId],
+      });
+
+      await client.execute({
+        sql: "DELETE FROM article_likes WHERE article_id = ?",
+        args: [articleId],
+      });
+
+      await client.execute({
+        sql: "DELETE FROM comments WHERE article_id = ?",
+        args: [articleId],
+      });
+
+      // Delete article
+      await client.execute({
+        sql: "DELETE FROM articles WHERE id = ?",
+        args: [articleId],
+      });
     }
-    res.json({ success: true, deleted: ids.length });
+
+    res.json({ success: true, deleted: idsArray.length });
   } catch (error) {
-    console.error("Admin bulk delete articles error:", error);
+    console.error("Admin delete articles error:", error);
     res.status(500).json({ error: "Failed to delete articles" });
   }
 });
 
-// GET /api/admin/articles/:id - Get single article
+// GET /api/admin/articles/:id - Get single article by ID
 router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const client = getDatabaseClient();
 
     const result = await client.execute({
-      sql: "SELECT * FROM articles WHERE id = ?",
+      sql: `
+        SELECT a.*, 
+               au.name as author_name, au.slug as author_slug,
+               c.name as category_name, c.slug as category_slug
+        FROM articles a
+        LEFT JOIN authors au ON a.author_id = au.id
+        LEFT JOIN categories c ON a.category_id = c.id
+        WHERE a.id = ?
+      `,
       args: [id],
     });
 
@@ -251,102 +304,24 @@ router.get("/:id", async (req, res) => {
 
     // Get tags
     const tagsResult = await client.execute({
-      sql: `SELECT t.* FROM tags t
-            JOIN article_tags at ON t.id = at.tag_id
-            WHERE at.article_id = ?`,
+      sql: `
+        SELECT t.id, t.name, t.slug
+        FROM tags t
+        INNER JOIN article_tags at ON t.id = at.tag_id
+        WHERE at.article_id = ?
+      `,
       args: [id],
     });
 
-    res.json({
-      article: result.rows[0],
+    const article = {
+      ...result.rows[0],
       tags: tagsResult.rows,
-    });
+    };
+
+    res.json(article);
   } catch (error) {
     console.error("Admin get article error:", error);
     res.status(500).json({ error: "Failed to fetch article" });
-  }
-});
-
-// PUT /api/admin/articles/:id - Update article (alternative URL pattern)
-router.put("/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const body = req.body;
-    const client = getDatabaseClient();
-    const now = Math.floor(Date.now() / 1000);
-
-    // Update article
-    await client.execute({
-      sql: `UPDATE articles SET
-        title = ?, slug = ?, excerpt = ?, content = ?, tldr = ?,
-        image_url = ?, author_id = ?, category_id = ?, read_time = ?,
-        is_featured = ?, is_published = ?,
-        published_at_int = CASE WHEN ? = 1 AND published_at_int IS NULL THEN ? ELSE published_at_int END,
-        updated_at_int = ?
-      WHERE id = ?`,
-      args: [
-        body.title,
-        body.slug,
-        body.excerpt || null,
-        body.content || null,
-        body.tldr || null,
-        body.image_url || null,
-        body.author_id,
-        body.category_id || null,
-        body.read_time || "5 min",
-        body.is_featured ? 1 : 0,
-        body.is_published ? 1 : 0,
-        body.is_published ? 1 : 0,
-        now,
-        now,
-        id,
-      ],
-    });
-
-    // Update tags - delete old ones and insert new ones
-    if (body.tags) {
-      await client.execute({
-        sql: "DELETE FROM article_tags WHERE article_id = ?",
-        args: [id],
-      });
-
-      for (const tagId of body.tags) {
-        await client.execute({
-          sql: "INSERT INTO article_tags (article_id, tag_id) VALUES (?, ?)",
-          args: [id, tagId],
-        });
-      }
-    }
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error("Admin update article error:", error);
-    res.status(500).json({ error: "Failed to update article" });
-  }
-});
-
-// DELETE /api/admin/articles/:id - Delete article
-router.delete("/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const client = getDatabaseClient();
-
-    // Delete article tags first
-    await client.execute({
-      sql: "DELETE FROM article_tags WHERE article_id = ?",
-      args: [id],
-    });
-
-    // Delete article
-    await client.execute({
-      sql: "DELETE FROM articles WHERE id = ?",
-      args: [id],
-    });
-
-    res.json({ success: true });
-  } catch (error) {
-    console.error("Admin delete article error:", error);
-    res.status(500).json({ error: "Failed to delete article" });
   }
 });
 
