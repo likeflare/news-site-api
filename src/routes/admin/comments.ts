@@ -63,7 +63,7 @@ router.get("/", async (req, res) => {
 router.put("/", validateBody(updateCommentSchema), async (req, res) => {
   try {
     const { id, content, is_approved } = req.body;
-    
+
     if (!id) {
       return res.status(400).json({ error: "Comment ID required in body" });
     }
@@ -108,14 +108,20 @@ router.put("/", validateBody(updateCommentSchema), async (req, res) => {
 // DELETE /api/admin/comments - Bulk delete
 router.delete("/", async (req, res) => {
   try {
+    console.log("🔍 DELETE / handler - req.body:", JSON.stringify(req.body));
+    console.log("🔍 DELETE / handler - typeof req.body:", typeof req.body);
+    console.log("🔍 DELETE / handler - ids:", req.body.ids);
+    
     const { ids } = req.body;
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      console.log("❌ DELETE / handler - validation failed:", { ids, isArray: Array.isArray(ids), length: ids?.length });
       return res.status(400).json({ error: "IDs array required" });
     }
     const client = getDatabaseClient();
     for (const id of ids) {
       await client.execute({ sql: "DELETE FROM comments WHERE id = ?", args: [id] });
     }
+    console.log("✅ DELETE / handler - success, deleted:", ids.length);
     res.json({ success: true, deleted: ids.length });
   } catch (error) {
     console.error("Admin bulk delete comments error:", error);
