@@ -287,6 +287,9 @@ router.put("/:id", async (req, res) => {
           "author_name",
           "category_name",
           "category_color",
+          "category_slug",
+          "comment_count",
+          "real_comment_count",
         ].includes(key),
     );
 
@@ -348,7 +351,69 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// DELETE /api/admin/articles/:id - Delete single article
+// DELETE /api/admin/articles - Delete article(s) from request body
+router.delete("/", async (req, res) => {
+  const user = (req as any).user;
+  try {
+    const { id, ids } = req.body;
+
+    // Support both single ID and multiple IDs
+    const idsToDelete = ids || (id ? [id] : []);
+
+    if (!idsToDelete || idsToDelete.length === 0) {
+      return res.status(400).json({ error: "No article ID(s) provided" });
+    }
+
+    const client = getDatabaseClient();
+    let deletedCount = 0;
+
+    for (const articleId of idsToDelete) {
+      // Delete article tags first (foreign key constraint)
+      await client.execute({
+        sql: "DELETE FROM article_tags WHERE article_id = ?",
+        args: [articleId],
+      });
+
+      // Delete article
+      await client.execute({
+        sql: "DELETE FROM articles WHERE id = ?",
+        args: [articleId],
+      });
+
+      await logAdminAction({
+        userId: user.id,
+        userEmail: user.email,
+        action: "DELETE_ARTICLE",
+        resource: "article",
+        resourceId: articleId,
+        details: { bulk: idsToDelete.length > 1 },
+        ipAddress: req.get("fly-client-ip") || req.ip,
+        userAgent: req.get("user-agent"),
+        success: true,
+      });
+
+      deletedCount++;
+    }
+
+    res.json({ success: true, deletedCount });
+  } catch (error) {
+    const user = (req as any).user;
+    await logAdminAction({
+      userId: user.id,
+      userEmail: user.email,
+      action: "DELETE_ARTICLE",
+      resource: "article",
+      details: { error: (error as Error).message },
+      ipAddress: req.get("fly-client-ip") || req.ip,
+      userAgent: req.get("user-agent"),
+      success: false,
+    });
+    console.error("Delete article error:", error);
+    res.status(500).json({ error: "Failed to delete article" });
+  }
+});
+
+// DELETE /api/admin/articles/:id - Delete single article (URL parameter)
 router.delete("/:id", async (req, res) => {
   const user = (req as any).user;
   try {
