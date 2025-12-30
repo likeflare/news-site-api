@@ -1,12 +1,10 @@
 import { Router } from "express";
 import { getDatabaseClient } from "../config/database";
 import { optionalAuth } from "../middleware/auth";
-import { validateQuery, articlesQuerySchema } from "../middleware/validation";
 
 const router = Router();
 
-// GET /api/articles - List articles
-router.get("/", optionalAuth, validateQuery(articlesQuerySchema), async (req, res) => {
+router.get("/", optionalAuth, async (req, res) => {
   try {
     const {
       limit = "20",
@@ -18,28 +16,27 @@ router.get("/", optionalAuth, validateQuery(articlesQuerySchema), async (req, re
       search,
     } = req.query;
 
-    const user = (req as any).user;
     const client = getDatabaseClient();
 
     let query = `
       SELECT
-        a.*,
+        a.id, a.title, a.slug, a.excerpt, a.content, a.tldr, a.image_url,
+        a.author_id, a.category_id, a.read_time, a.view_count,
+        a.is_featured, a.is_published, 
+        a.published_at_int, a.created_at_int, a.updated_at_int,
         au.name as author_name,
         au.slug as author_slug,
         au.avatar_url as author_avatar_url,
         c.name as category_name,
         c.slug as category_slug,
-        c.color as category_color,
-        COALESCE(COUNT(DISTINCT al.id), 0) as like_count,
-        COALESCE(MAX(CASE WHEN al.user_id = ? THEN 1 ELSE 0 END), 0) as isLikedByUser
+        c.color as category_color
       FROM articles a
       LEFT JOIN authors au ON a.author_id = au.id
       LEFT JOIN categories c ON a.category_id = c.id
-      LEFT JOIN article_likes al ON a.id = al.article_id
       WHERE a.is_published = 1
     `;
 
-    const args: any[] = [user?.id || ""];
+    const args: any[] = [];
 
     if (categorySlug) {
       query += ` AND c.slug = ?`;
@@ -56,21 +53,23 @@ router.get("/", optionalAuth, validateQuery(articlesQuerySchema), async (req, re
     }
 
     if (search) {
+      const sanitizedSearch = String(search).replace(/[%_\\]/g, '\\$&').substring(0, 200);
       query += ` AND (a.title LIKE ? OR a.excerpt LIKE ? OR a.content LIKE ?)`;
-      const searchPattern = `%${search}%`;
+      const searchPattern = `%${sanitizedSearch}%`;
       args.push(searchPattern, searchPattern, searchPattern);
     }
 
-    query += ` GROUP BY a.id ORDER BY a.published_at_int DESC LIMIT ? OFFSET ?`;
+    query += ` ORDER BY a.published_at_int DESC LIMIT ? OFFSET ?`;
     args.push(parseInt(limit as string), parseInt(offset as string));
 
     const result = await client.execute({ sql: query, args });
 
-    // Transform results to include like_count as number and isLikedByUser as boolean
     const articles = result.rows.map((row: any) => ({
       ...row,
-      like_count: Number(row.like_count),
-      isLikedByUser: Boolean(row.isLikedByUser),
+      comment_count: 0, // Will be populated by frontend
+      view_count: Number(row.view_count) || 0,
+      like_count: 0, // Will be populated by frontend
+      isLikedByUser: false,
     }));
 
     res.json({ articles });
@@ -80,17 +79,18 @@ router.get("/", optionalAuth, validateQuery(articlesQuerySchema), async (req, re
   }
 });
 
-// GET /api/articles/:slug - Get single article
 router.get("/:slug", optionalAuth, async (req, res) => {
   try {
     const { slug } = req.params;
-    const user = (req as any).user;
     const client = getDatabaseClient();
 
     const result = await client.execute({
       sql: `
         SELECT
-          a.*,
+          a.id, a.title, a.slug, a.excerpt, a.content, a.tldr, a.image_url,
+          a.author_id, a.category_id, a.read_time, a.view_count,
+          a.is_featured, a.is_published, 
+          a.published_at_int, a.created_at_int, a.updated_at_int,
           au.name as author_name,
           au.slug as author_slug,
           au.bio as author_bio,
@@ -102,17 +102,13 @@ router.get("/:slug", optionalAuth, async (req, res) => {
           c.name as category_name,
           c.slug as category_slug,
           c.color as category_color,
-          c.description as category_description,
-          COALESCE(COUNT(DISTINCT al.id), 0) as like_count,
-          COALESCE(MAX(CASE WHEN al.user_id = ? THEN 1 ELSE 0 END), 0) as isLikedByUser
+          c.description as category_description
         FROM articles a
         LEFT JOIN authors au ON a.author_id = au.id
         LEFT JOIN categories c ON a.category_id = c.id
-        LEFT JOIN article_likes al ON a.id = al.article_id
         WHERE a.slug = ? AND a.is_published = 1
-        GROUP BY a.id
       `,
-      args: [user?.id || "", slug],
+      args: [slug],
     });
 
     if (result.rows.length === 0) {
@@ -121,14 +117,14 @@ router.get("/:slug", optionalAuth, async (req, res) => {
 
     const row = result.rows[0];
 
-    // Transform result to include like_count as number and isLikedByUser as boolean
     const article: any = {
       ...row,
-      like_count: Number(row.like_count),
-      isLikedByUser: Boolean(row.isLikedByUser),
+      comment_count: 0, // Will be populated by frontend
+      view_count: Number(row.view_count) || 0,
+      like_count: 0, // Will be populated by frontend
+      isLikedByUser: false,
     };
 
-    // Increment view count (async, don't wait)
     client.execute({
       sql: "UPDATE articles SET view_count = view_count + 1 WHERE id = ?",
       args: [row.id],

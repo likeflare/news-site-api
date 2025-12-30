@@ -1,84 +1,73 @@
-import { z, ZodError } from "zod";
+import { z } from "zod";
 import { Request, Response, NextFunction } from "express";
 
-// Comment validation schemas
-export const createCommentSchema = z.object({
-  articleId: z.string().min(1, "Article ID is required"),
-  content: z.string()
-    .min(1, "Comment content is required")
-    .max(5000, "Comment must be less than 5000 characters"),
-  parentId: z.string().optional().nullable(),
+const MAX_TEXT_LENGTH = 10000;
+const MAX_SEARCH_LENGTH = 200;
+const MAX_EMAIL_LENGTH = 255;
+
+export const emailSchema = z.string()
+  .email("Invalid email format")
+  .max(MAX_EMAIL_LENGTH, "Email too long")
+  .trim()
+  .toLowerCase();
+
+export const searchSchema = z.string()
+  .max(MAX_SEARCH_LENGTH, "Search query too long")
+  .trim();
+
+export const articlesQuerySchema = z.object({
+  limit: z.string().optional(),
+  offset: z.string().optional(),
+  categorySlug: z.string().max(100).optional(),
+  authorSlug: z.string().max(100).optional(),
+  tagSlug: z.string().max(100).optional(),
+  featured: z.enum(["true", "false"]).optional(),
+  search: z.string().max(MAX_SEARCH_LENGTH).optional(),
+}).passthrough();
+
+export const searchQuerySchema = z.object({
+  q: z.string().max(MAX_SEARCH_LENGTH).optional(),
+  limit: z.string().optional(),
+}).passthrough();
+
+export const relatedQuerySchema = z.object({
+  articleId: z.string().max(100).optional(),
+  limit: z.string().optional(),
+}).passthrough();
+
+export const commentsQuerySchema = z.object({
+  articleId: z.string().max(100).optional(),
+  limit: z.string().optional(),
+  offset: z.string().optional(),
+}).passthrough();
+
+export const commentSchema = z.object({
+  articleId: z.string().max(100),
+  content: z.string().min(1).max(MAX_TEXT_LENGTH).trim(),
+  parentId: z.string().max(100).optional().nullable(),
 });
 
+export const createCommentSchema = commentSchema;
+
 export const updateCommentSchema = z.object({
-  content: z.string()
-    .min(1, "Comment content is required")
-    .max(5000, "Comment must be less than 5000 characters").optional(),
+  id: z.string().max(100),
+  content: z.string().min(1).max(MAX_TEXT_LENGTH).trim().optional(),
   is_approved: z.boolean().optional(),
 });
 
-// Article validation schemas
-export const createArticleSchema = z.object({
-  title: z.string().min(1).max(200),
-  slug: z.string().min(1).max(200),
-  excerpt: z.string().max(500).optional(),
-  content: z.string().optional(),
-  tldr: z.string().max(1000).optional(),
-  image_url: z.string().url().optional(),
-  author_id: z.string().min(1),
-  category_id: z.string().optional(),
-  read_time: z.string().min(1),
-  is_featured: z.boolean().optional(),
-  is_published: z.boolean().optional(),
-});
-
-export const updateArticleSchema = createArticleSchema.partial();
-
-// Query parameter validation schemas
-export const articlesQuerySchema = z.object({
-  limit: z.string().regex(/^\d+$/, "limit must be a positive number").optional(),
-  offset: z.string().regex(/^\d+$/, "offset must be a positive number").optional(),
-  categorySlug: z.string().optional(),
-  authorSlug: z.string().optional(),
-  tagSlug: z.string().optional(),
-  featured: z.enum(["true", "false"]).optional(),
-  search: z.string().optional(),
-});
-
-export const commentsQuerySchema = z.object({
-  articleId: z.string().min(1, "articleId is required"),
-  userEmail: z.string().email().optional(),
-});
-
-export const relatedQuerySchema = z.object({
-  articleId: z.string().min(1, "articleId is required"),
-  limit: z.string().regex(/^\d+$/, "limit must be a positive number").optional(),
-});
-
-export const searchQuerySchema = z.object({
-  q: z.string().min(1, "search query is required"),
-  limit: z.string().regex(/^\d+$/, "limit must be a positive number").optional(),
-  offset: z.string().regex(/^\d+$/, "offset must be a positive number").optional(),
-});
-
-export const adminListQuerySchema = z.object({
-  limit: z.string().regex(/^\d+$/, "limit must be a positive number").optional(),
-  offset: z.string().regex(/^\d+$/, "offset must be a positive number").optional(),
-  approved: z.enum(["true", "false"]).optional(),
-  published: z.enum(["true", "false"]).optional(),
-});
-
-// Middleware to validate request body
 export function validateBody(schema: z.ZodSchema) {
   return (req: Request, res: Response, next: NextFunction) => {
     try {
-      schema.parse(req.body);
+      req.body = schema.parse(req.body);
       next();
     } catch (error) {
-      if (error instanceof ZodError) {
+      if (error instanceof z.ZodError) {
         return res.status(400).json({
           error: "Validation failed",
-          details: error.issues,
+          details: error.issues.map((e: any) => ({
+            field: e.path.join('.'),
+            message: e.message
+          }))
         });
       }
       next(error);
@@ -86,20 +75,28 @@ export function validateBody(schema: z.ZodSchema) {
   };
 }
 
-// Middleware to validate query parameters
 export function validateQuery(schema: z.ZodSchema) {
   return (req: Request, res: Response, next: NextFunction) => {
     try {
-      schema.parse(req.query);
+      req.query = schema.parse(req.query) as any;
       next();
     } catch (error) {
-      if (error instanceof ZodError) {
+      if (error instanceof z.ZodError) {
         return res.status(400).json({
-          error: "Invalid query parameters",
-          details: error.issues,
+          error: "Validation failed",
+          details: error.issues.map((e: any) => ({
+            field: e.path.join('.'),
+            message: e.message
+          }))
         });
       }
       next(error);
     }
   };
+}
+
+export function sanitizeSQLLikePattern(pattern: string): string {
+  return pattern
+    .replace(/[%_\\]/g, '\\$&')
+    .substring(0, MAX_SEARCH_LENGTH);
 }

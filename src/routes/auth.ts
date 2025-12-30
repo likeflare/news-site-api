@@ -2,26 +2,23 @@ import { Router } from "express";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { getDatabaseClient } from "../config/database";
-import { generateAccessToken, generateRefreshToken, verifyRefreshToken, verifyAccessToken } from "../utils/tokens";
+import { generateAccessToken, generateRefreshToken, verifyRefreshToken, verifyAccessToken, revokeToken, revokeUserTokens } from "../utils/tokens";
+import { requireAuth } from "../middleware/auth";
+import { logAdminAction } from "../utils/auditLog";
 
 const router = Router();
 
-// Get the correct frontend URL based on the request
 function getFrontendUrl(req: any): string {
-  // Check Referer header first
   const referer = req.get('referer') || req.get('referrer');
   if (referer) {
     const url = new URL(referer);
     const origin = `${url.protocol}//${url.host}`;
-
-    // Verify it's an allowed origin
     const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',');
     if (allowedOrigins.includes(origin)) {
       return origin;
     }
   }
 
-  // Check Origin header
   const origin = req.get('origin');
   if (origin) {
     const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',');
@@ -30,7 +27,6 @@ function getFrontendUrl(req: any): string {
     }
   }
 
-  // Check X-Forwarded-Host header
   const forwardedHost = req.get('x-forwarded-host');
   const forwardedProto = req.get('x-forwarded-proto') || 'https';
   if (forwardedHost) {
@@ -41,12 +37,10 @@ function getFrontendUrl(req: any): string {
     }
   }
 
-  // Default to first allowed origin
   const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',');
   return allowedOrigins[0];
 }
 
-// Configure Google OAuth Strategy
 passport.use(
   new GoogleStrategy(
     {
@@ -65,7 +59,6 @@ passport.use(
           return done(new Error("No email found in Google profile"));
         }
 
-        // Check if user exists
         const existingUser = await client.execute({
           sql: "SELECT id, name, email, avatar_url, role FROM users WHERE email = ?",
           args: [email],
@@ -74,7 +67,6 @@ passport.use(
         let user;
 
         if (existingUser.rows.length === 0) {
-          // Create new user
           const userId = `user-${Date.now()}-${Math.random().toString(36).substring(7)}`;
           const now = Math.floor(Date.now() / 1000);
 
@@ -108,7 +100,6 @@ passport.use(
   )
 );
 
-// Serialize user for session
 passport.serializeUser((user: any, done) => {
   done(null, user);
 });
@@ -117,11 +108,8 @@ passport.deserializeUser((user: any, done) => {
   done(null, user);
 });
 
-// Store the frontend URL in session/state during OAuth initiation
 router.get("/google", (req, res, next) => {
   const frontendUrl = getFrontendUrl(req);
-
-  // Store frontend URL in state parameter
   const state = Buffer.from(JSON.stringify({ frontendUrl })).toString('base64');
 
   passport.authenticate("google", {
@@ -131,7 +119,6 @@ router.get("/google", (req, res, next) => {
   })(req, res, next);
 });
 
-// Google OAuth callback
 router.get(
   "/callback/google",
   passport.authenticate("google", { session: false, failureRedirect: "/auth/error" }),
@@ -139,7 +126,6 @@ router.get(
     try {
       const user = req.user as any;
 
-      // SECURITY: Generate separate access and refresh tokens with different secrets
       const accessToken = generateAccessToken({
         sub: user.id,
         email: user.email,
@@ -155,7 +141,6 @@ router.get(
         role: user.role,
       });
 
-      // Get frontend URL from state parameter or fallback
       let frontendUrl = "http://localhost:3000";
 
       try {
@@ -167,11 +152,9 @@ router.get(
           }
         }
       } catch (e) {
-        // Fallback to getting from request
         frontendUrl = getFrontendUrl(req);
       }
 
-      // Redirect to frontend with both tokens
       res.redirect(`${frontendUrl}/auth/callback?token=${accessToken}&refreshToken=${refreshToken}`);
     } catch (error) {
       console.error("Callback error:", error);
@@ -181,20 +164,20 @@ router.get(
   }
 );
 
-// Get current user from token
 router.get("/me", async (req, res) => {
+  const startTime = Date.now();
+  
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 100) await new Promise(resolve => setTimeout(resolve, 100 - elapsed));
       return res.status(401).json({ error: "No token provided" });
     }
 
     const token = authHeader.substring(7);
-    
-    // Use secure token verification with access token secret
     const decoded = verifyAccessToken(token);
 
-    // Fetch fresh user data from database
     const client = getDatabaseClient();
     const result = await client.execute({
       sql: "SELECT id, name, email, avatar_url, role FROM users WHERE id = ?",
@@ -202,22 +185,50 @@ router.get("/me", async (req, res) => {
     });
 
     if (result.rows.length === 0) {
+      const elapsed = Date.now() - startTime;
+      if (elapsed < 100) await new Promise(resolve => setTimeout(resolve, 100 - elapsed));
       return res.status(404).json({ error: "User not found" });
     }
 
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 100) await new Promise(resolve => setTimeout(resolve, 100 - elapsed));
+    
     res.json({ user: result.rows[0] });
   } catch (error) {
     console.error("Get user error:", error);
+    const elapsed = Date.now() - startTime;
+    if (elapsed < 100) await new Promise(resolve => setTimeout(resolve, 100 - elapsed));
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 });
 
-// Sign out endpoint
-router.post("/signout", (req, res) => {
-  res.json({ success: true });
+router.post("/signout", requireAuth, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    const authHeader = req.headers.authorization;
+    const token = authHeader?.substring(7);
+
+    if (token) {
+      const expiresAt = Date.now() + (60 * 60 * 1000);
+      revokeToken(token, expiresAt);
+    }
+
+    await logAdminAction({
+      userId: user.id,
+      userEmail: user.email,
+      action: 'SIGNOUT',
+      resource: 'auth',
+      success: true,
+      ipAddress: req.get('fly-client-ip') || req.ip,
+      userAgent: req.get('user-agent'),
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    res.json({ success: true });
+  }
 });
 
-// SECURITY: Refresh token endpoint with separate secret verification
 router.post("/refresh", async (req, res) => {
   try {
     const { refreshToken } = req.body;
@@ -226,10 +237,8 @@ router.post("/refresh", async (req, res) => {
       return res.status(400).json({ error: "Refresh token required" });
     }
 
-    // Verify refresh token with separate secret
     const decoded = verifyRefreshToken(refreshToken);
 
-    // Fetch fresh user data from database to ensure user still exists and get current role
     const client = getDatabaseClient();
     const result = await client.execute({
       sql: "SELECT id, name, email, avatar_url, role FROM users WHERE id = ? AND email = ?",
@@ -242,7 +251,6 @@ router.post("/refresh", async (req, res) => {
 
     const user = result.rows[0] as any;
 
-    // Generate new access token with access token secret
     const newAccessToken = generateAccessToken({
       sub: user.id as string,
       email: user.email as string,
@@ -251,13 +259,47 @@ router.post("/refresh", async (req, res) => {
       image: user.avatar_url as string,
     });
 
+    const newRefreshToken = generateRefreshToken({
+      sub: user.id as string,
+      email: user.email as string,
+      name: user.name as string,
+      role: user.role as string,
+    });
+
+    const oldRefreshExpires = Date.now() + (7 * 24 * 60 * 60 * 1000);
+    revokeToken(refreshToken, oldRefreshExpires);
+
     res.json({
       accessToken: newAccessToken,
-      expiresIn: 3600 // 1 hour in seconds
+      refreshToken: newRefreshToken,
+      expiresIn: 3600
     });
   } catch (error) {
     console.error("Token refresh error:", error);
     return res.status(401).json({ error: "Invalid or expired refresh token" });
+  }
+});
+
+router.post("/revoke", requireAuth, async (req, res) => {
+  try {
+    const user = (req as any).user;
+    
+    revokeUserTokens(user.id);
+
+    await logAdminAction({
+      userId: user.id,
+      userEmail: user.email,
+      action: 'REVOKE_ALL_TOKENS',
+      resource: 'auth',
+      success: true,
+      ipAddress: req.get('fly-client-ip') || req.ip,
+      userAgent: req.get('user-agent'),
+    });
+
+    res.json({ success: true, message: "All tokens revoked" });
+  } catch (error) {
+    console.error("Token revocation error:", error);
+    return res.status(500).json({ error: "Failed to revoke tokens" });
   }
 });
 

@@ -2,7 +2,6 @@ import { Router } from "express";
 import { getDatabaseClient } from "../config/database";
 import { optionalAuth } from "../middleware/auth";
 
-import { validateQuery, searchQuerySchema } from "../middleware/validation";
 const router = Router();
 
 // Helper to parse JSON field
@@ -29,7 +28,7 @@ function transformArticleRow(row: any): any {
     read_time: row.read_time,
     view_count: Number(row.view_count) || 0,
     like_count: Number(row.like_count) || 0,
-    comment_count: Number(row.comment_count) || 0,
+    comment_count: Number(row.real_comment_count) || 0,
     is_featured: Boolean(row.is_featured),
     is_published: Boolean(row.is_published),
     published_at: row.published_at_int || row.published_at,
@@ -73,7 +72,7 @@ function transformArticleRow(row: any): any {
 }
 
 // GET /api/search?q=searchterm
-router.get("/", optionalAuth, validateQuery(searchQuerySchema), async (req, res) => {
+router.get("/", optionalAuth, async (req, res) => {
   try {
     const { q, limit = "20", offset = "0" } = req.query;
 
@@ -86,7 +85,11 @@ router.get("/", optionalAuth, validateQuery(searchQuerySchema), async (req, res)
 
     const query = `
       SELECT
-        a.*,
+        a.id, a.title, a.slug, a.excerpt, a.content, a.tldr, a.image_url,
+        a.author_id, a.category_id, a.read_time, a.view_count, a.like_count,
+        a.is_featured, a.is_published, a.published_at, a.created_at, a.updated_at,
+        a.published_at_int, a.created_at_int, a.updated_at_int,
+        (SELECT COUNT(*) FROM comments WHERE article_id = a.id) as real_comment_count,
         au.name as author_name,
         au.slug as author_slug,
         au.bio as author_bio,
@@ -120,8 +123,8 @@ router.get("/", optionalAuth, validateQuery(searchQuerySchema), async (req, res)
     const result = await client.execute({
       sql: query,
       args: [
-        searchPattern, 
-        searchPattern, 
+        searchPattern,
+        searchPattern,
         searchPattern,
         parseInt(limit as string),
         parseInt(offset as string)
@@ -130,10 +133,10 @@ router.get("/", optionalAuth, validateQuery(searchQuerySchema), async (req, res)
 
     const articles = result.rows.map(transformArticleRow);
 
-    res.json({ 
+    res.json({
       articles,
       query: q,
-      count: articles.length 
+      count: articles.length
     });
   } catch (error) {
     console.error("Search error:", error);
