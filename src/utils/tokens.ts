@@ -7,42 +7,55 @@ import { tokenBlacklistDb } from "./tokenBlacklistDb";
  */
 
 const ACCESS_TOKEN_SECRET = (() => {
-  const secret = process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET;
-  if (!secret) {
-    console.error(
-      "FATAL: JWT_SECRET or NEXTAUTH_SECRET environment variable not set!",
-    );
-    console.error("Exiting application due to missing JWT secret...");
-    process.exit(1);
-  }
-  if (secret.length < 32) {
-    console.error(
-      "FATAL: JWT_SECRET must be at least 32 characters long for security!",
-    );
-    console.error("Generate a secure secret with: openssl rand -base64 48");
-    process.exit(1);
-  }
-  return secret;
+  // Delay secret validation to allow dotenv to load in development
+  setTimeout(() => {
+    const secret = process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET;
+    if (!secret) {
+      console.error(
+        "FATAL: JWT_SECRET or NEXTAUTH_SECRET environment variable not set!",
+      );
+      console.error("Exiting application due to missing JWT secret...");
+      process.exit(1);
+    }
+    if (secret.length < 32) {
+      console.error(
+        "FATAL: JWT_SECRET must be at least 32 characters long for security!",
+      );
+      console.error("Generate a secure secret with: openssl rand -base64 48");
+      process.exit(1);
+    }
+  }, 100);
+  return process.env.JWT_SECRET || process.env.NEXTAUTH_SECRET || "";
 })();
 
 const REFRESH_TOKEN_SECRET = (() => {
-  const secret =
+  // Delay secret validation to allow dotenv to load in development
+  setTimeout(() => {
+    const secret =
+      process.env.JWT_REFRESH_SECRET ||
+      process.env.JWT_SECRET ||
+      process.env.NEXTAUTH_SECRET;
+    if (!secret) {
+      console.error("FATAL: JWT_REFRESH_SECRET not set!");
+      console.error(
+        "Exiting application due to missing refresh token secret...",
+      );
+      process.exit(1);
+    }
+    if (secret.length < 32) {
+      console.error(
+        "FATAL: JWT_REFRESH_SECRET must be at least 32 characters long for security!",
+      );
+      console.error("Generate a secure secret with: openssl rand -base64 48");
+      process.exit(1);
+    }
+  }, 100);
+  return (
     process.env.JWT_REFRESH_SECRET ||
     process.env.JWT_SECRET ||
-    process.env.NEXTAUTH_SECRET;
-  if (!secret) {
-    console.error("FATAL: JWT_REFRESH_SECRET not set!");
-    console.error("Exiting application due to missing refresh token secret...");
-    process.exit(1);
-  }
-  if (secret.length < 32) {
-    console.error(
-      "FATAL: JWT_REFRESH_SECRET must be at least 32 characters long for security!",
-    );
-    console.error("Generate a secure secret with: openssl rand -base64 48");
-    process.exit(1);
-  }
-  return secret;
+    process.env.NEXTAUTH_SECRET ||
+    ""
+  );
 })();
 
 function getAccessTokenSecret(): string {

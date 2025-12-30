@@ -1,8 +1,11 @@
+// CRITICAL: Load environment variables FIRST before any other imports
+import dotenv from "dotenv";
+dotenv.config();
+
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
-import dotenv from "dotenv";
 import { testDatabaseConnection } from "./config/database";
 import { globalRateLimiter, authRateLimiter } from "./middleware/rateLimit";
 import { createAuditLogsTable } from "./utils/auditLog";
@@ -26,8 +29,6 @@ import authRouter from "./routes/auth";
 import passport from "passport";
 import usersRouter from "./routes/users";
 import adminArticlesRouter from "./routes/admin/articles";
-
-dotenv.config();
 
 const app = express();
 const PORT = parseInt(process.env.PORT || "3001", 10);
