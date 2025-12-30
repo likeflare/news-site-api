@@ -2,42 +2,51 @@ import { Router } from "express";
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { getDatabaseClient } from "../config/database";
-import { generateAccessToken, generateRefreshToken, verifyRefreshToken, verifyAccessToken, revokeToken, revokeUserTokens } from "../utils/tokens";
+import {
+  generateAccessToken,
+  generateRefreshToken,
+  verifyRefreshToken,
+  verifyAccessToken,
+  revokeToken,
+  revokeUserTokens,
+} from "../utils/tokens";
 import { requireAuth } from "../middleware/auth";
 import { logAdminAction } from "../utils/auditLog";
 
 const router = Router();
 
 function getFrontendUrl(req: any): string {
-  const referer = req.get('referer') || req.get('referrer');
+  const referer = req.get("referer") || req.get("referrer");
   if (referer) {
     const url = new URL(referer);
     const origin = `${url.protocol}//${url.host}`;
-    const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',');
+    const allowedOrigins = (process.env.ALLOWED_ORIGINS || "").split(",");
     if (allowedOrigins.includes(origin)) {
       return origin;
     }
   }
 
-  const origin = req.get('origin');
+  const origin = req.get("origin");
   if (origin) {
-    const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',');
+    const allowedOrigins = (process.env.ALLOWED_ORIGINS || "").split(",");
     if (allowedOrigins.includes(origin)) {
       return origin;
     }
   }
 
-  const forwardedHost = req.get('x-forwarded-host');
-  const forwardedProto = req.get('x-forwarded-proto') || 'https';
+  const forwardedHost = req.get("x-forwarded-host");
+  const forwardedProto = req.get("x-forwarded-proto") || "https";
   if (forwardedHost) {
     const forwardedOrigin = `${forwardedProto}://${forwardedHost}`;
-    const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',');
+    const allowedOrigins = (process.env.ALLOWED_ORIGINS || "").split(",");
     if (allowedOrigins.includes(forwardedOrigin)) {
       return forwardedOrigin;
     }
   }
 
-  const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000').split(',');
+  const allowedOrigins = (
+    process.env.ALLOWED_ORIGINS || "http://localhost:3000"
+  ).split(",");
   return allowedOrigins[0];
 }
 
@@ -77,7 +86,15 @@ passport.use(
                 created_at, updated_at, created_at_int, updated_at_int
               ) VALUES (?, ?, ?, ?, 'google', ?, 'user', datetime('now'), datetime('now'), ?, ?)
             `,
-            args: [userId, name, email, avatar_url || null, profile.id, now, now],
+            args: [
+              userId,
+              name,
+              email,
+              avatar_url || null,
+              profile.id,
+              now,
+              now,
+            ],
           });
 
           user = {
@@ -96,8 +113,8 @@ passport.use(
         console.error("OAuth error:", error);
         return done(error as Error);
       }
-    }
-  )
+    },
+  ),
 );
 
 passport.serializeUser((user: any, done) => {
@@ -110,18 +127,21 @@ passport.deserializeUser((user: any, done) => {
 
 router.get("/google", (req, res, next) => {
   const frontendUrl = getFrontendUrl(req);
-  const state = Buffer.from(JSON.stringify({ frontendUrl })).toString('base64');
+  const state = Buffer.from(JSON.stringify({ frontendUrl })).toString("base64");
 
   passport.authenticate("google", {
     scope: ["profile", "email"],
     session: false,
-    state
+    state,
   })(req, res, next);
 });
 
 router.get(
   "/callback/google",
-  passport.authenticate("google", { session: false, failureRedirect: "/auth/error" }),
+  passport.authenticate("google", {
+    session: false,
+    failureRedirect: "/auth/error",
+  }),
   (req, res) => {
     try {
       const user = req.user as any;
@@ -146,7 +166,7 @@ router.get(
       try {
         const state = req.query.state as string;
         if (state) {
-          const decoded = JSON.parse(Buffer.from(state, 'base64').toString());
+          const decoded = JSON.parse(Buffer.from(state, "base64").toString());
           if (decoded.frontendUrl) {
             frontendUrl = decoded.frontendUrl;
           }
@@ -155,28 +175,31 @@ router.get(
         frontendUrl = getFrontendUrl(req);
       }
 
-      res.redirect(`${frontendUrl}/auth/callback?token=${accessToken}&refreshToken=${refreshToken}`);
+      res.redirect(
+        `${frontendUrl}/auth/callback?token=${accessToken}&refreshToken=${refreshToken}`,
+      );
     } catch (error) {
       console.error("Callback error:", error);
       const frontendUrl = getFrontendUrl(req);
       res.redirect(`${frontendUrl}/auth/error`);
     }
-  }
+  },
 );
 
 router.get("/me", async (req, res) => {
   const startTime = Date.now();
-  
+
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       const elapsed = Date.now() - startTime;
-      if (elapsed < 100) await new Promise(resolve => setTimeout(resolve, 100 - elapsed));
+      if (elapsed < 100)
+        await new Promise((resolve) => setTimeout(resolve, 100 - elapsed));
       return res.status(401).json({ error: "No token provided" });
     }
 
     const token = authHeader.substring(7);
-    const decoded = verifyAccessToken(token);
+    const decoded = await verifyAccessToken(token);
 
     const client = getDatabaseClient();
     const result = await client.execute({
@@ -186,18 +209,21 @@ router.get("/me", async (req, res) => {
 
     if (result.rows.length === 0) {
       const elapsed = Date.now() - startTime;
-      if (elapsed < 100) await new Promise(resolve => setTimeout(resolve, 100 - elapsed));
+      if (elapsed < 100)
+        await new Promise((resolve) => setTimeout(resolve, 100 - elapsed));
       return res.status(404).json({ error: "User not found" });
     }
 
     const elapsed = Date.now() - startTime;
-    if (elapsed < 100) await new Promise(resolve => setTimeout(resolve, 100 - elapsed));
-    
+    if (elapsed < 100)
+      await new Promise((resolve) => setTimeout(resolve, 100 - elapsed));
+
     res.json({ user: result.rows[0] });
   } catch (error) {
     console.error("Get user error:", error);
     const elapsed = Date.now() - startTime;
-    if (elapsed < 100) await new Promise(resolve => setTimeout(resolve, 100 - elapsed));
+    if (elapsed < 100)
+      await new Promise((resolve) => setTimeout(resolve, 100 - elapsed));
     return res.status(401).json({ error: "Invalid or expired token" });
   }
 });
@@ -209,18 +235,25 @@ router.post("/signout", requireAuth, async (req, res) => {
     const token = authHeader?.substring(7);
 
     if (token) {
-      const expiresAt = Date.now() + (60 * 60 * 1000);
-      revokeToken(token, expiresAt);
+      try {
+        const decoded = await verifyAccessToken(token);
+        if (decoded.jti) {
+          const expiresAt = Date.now() + 60 * 60 * 1000;
+          await revokeToken(decoded.jti, expiresAt, "User signout");
+        }
+      } catch (err) {
+        // Token already invalid, ignore
+      }
     }
 
     await logAdminAction({
       userId: user.id,
       userEmail: user.email,
-      action: 'SIGNOUT',
-      resource: 'auth',
+      action: "SIGNOUT",
+      resource: "auth",
       success: true,
-      ipAddress: req.get('fly-client-ip') || req.ip,
-      userAgent: req.get('user-agent'),
+      ipAddress: req.get("fly-client-ip") || req.ip,
+      userAgent: req.get("user-agent"),
     });
 
     res.json({ success: true });
@@ -237,7 +270,7 @@ router.post("/refresh", async (req, res) => {
       return res.status(400).json({ error: "Refresh token required" });
     }
 
-    const decoded = verifyRefreshToken(refreshToken);
+    const decoded = await verifyRefreshToken(refreshToken);
 
     const client = getDatabaseClient();
     const result = await client.execute({
@@ -266,13 +299,16 @@ router.post("/refresh", async (req, res) => {
       role: user.role as string,
     });
 
-    const oldRefreshExpires = Date.now() + (7 * 24 * 60 * 60 * 1000);
-    revokeToken(refreshToken, oldRefreshExpires);
+    // Revoke old refresh token
+    if (decoded.jti) {
+      const oldRefreshExpires = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      await revokeToken(decoded.jti, oldRefreshExpires, "Token refresh");
+    }
 
     res.json({
       accessToken: newAccessToken,
       refreshToken: newRefreshToken,
-      expiresIn: 3600
+      expiresIn: 3600,
     });
   } catch (error) {
     console.error("Token refresh error:", error);
@@ -283,17 +319,17 @@ router.post("/refresh", async (req, res) => {
 router.post("/revoke", requireAuth, async (req, res) => {
   try {
     const user = (req as any).user;
-    
-    revokeUserTokens(user.id);
+
+    await revokeUserTokens(user.id, "User requested token revocation");
 
     await logAdminAction({
       userId: user.id,
       userEmail: user.email,
-      action: 'REVOKE_ALL_TOKENS',
-      resource: 'auth',
+      action: "REVOKE_ALL_TOKENS",
+      resource: "auth",
       success: true,
-      ipAddress: req.get('fly-client-ip') || req.ip,
-      userAgent: req.get('user-agent'),
+      ipAddress: req.get("fly-client-ip") || req.ip,
+      userAgent: req.get("user-agent"),
     });
 
     res.json({ success: true, message: "All tokens revoked" });

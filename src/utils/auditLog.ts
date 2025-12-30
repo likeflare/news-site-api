@@ -16,6 +16,9 @@ export interface AuditLogEntry {
   success: boolean;
 }
 
+let consecutiveFailures = 0;
+const MAX_CONSECUTIVE_FAILURES = 10;
+
 export async function logAdminAction(entry: AuditLogEntry): Promise<void> {
   try {
     const client = getDatabaseClient();
@@ -45,9 +48,24 @@ export async function logAdminAction(entry: AuditLogEntry): Promise<void> {
       ],
     });
 
-    console.log(`[AUDIT] ${entry.userEmail} - ${entry.action} ${entry.resource} ${entry.resourceId || ''} - ${entry.success ? 'SUCCESS' : 'FAILED'}`);
+    consecutiveFailures = 0; // Reset counter on success
+    console.log(
+      `[AUDIT] ${entry.userEmail} - ${entry.action} ${entry.resource} ${entry.resourceId || ""} - ${entry.success ? "SUCCESS" : "FAILED"}`,
+    );
   } catch (error) {
-    console.error('[AUDIT] Failed to log admin action:', error);
+    consecutiveFailures++;
+    console.error(
+      `[AUDIT] Failed to log admin action (${consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}):`,
+      error,
+    );
+
+    // CRITICAL: Alert if audit logging is failing repeatedly
+    if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+      console.error(
+        "🚨 CRITICAL: Audit logging has failed 10 consecutive times! This requires immediate investigation.",
+      );
+      // In production, you would send this to a monitoring service (e.g., Sentry, Datadog)
+    }
   }
 }
 
@@ -70,8 +88,25 @@ export async function createAuditLogsTable(): Promise<void> {
         created_at_int INTEGER
       )
     `);
-    console.log('[AUDIT] Audit logs table ready');
+    // Create indexes for better query performance
+    await client.execute(`
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_user
+      ON audit_logs(user_id)
+    `);
+
+    await client.execute(`
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_created
+      ON audit_logs(created_at_int DESC)
+    `);
+
+    await client.execute(`
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_action
+      ON audit_logs(action, created_at_int DESC)
+    `);
+
+    console.log("✅ Audit logs table ready with performance indexes");
   } catch (error) {
-    console.error('[AUDIT] Failed to create audit_logs table:', error);
+    console.error("[AUDIT] Failed to create audit_logs table:", error);
+    throw error; // Critical failure - should stop server startup
   }
 }

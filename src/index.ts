@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { testDatabaseConnection } from "./config/database";
 import { globalRateLimiter, authRateLimiter } from "./middleware/rateLimit";
 import { createAuditLogsTable } from "./utils/auditLog";
+import { tokenBlacklistDb } from "./utils/tokenBlacklistDb";
 
 import articlesRouter from "./routes/articles";
 import commentsRouter from "./routes/comments";
@@ -33,7 +34,9 @@ const PORT = parseInt(process.env.PORT || "3001", 10);
 
 app.set("trust proxy", true);
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000").split(",").map(o => o.trim());
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || "http://localhost:3000")
+  .split(",")
+  .map((o) => o.trim());
 
 app.use((req, res, next) => {
   const origin = req.get("origin");
@@ -41,12 +44,18 @@ app.use((req, res, next) => {
 
   if (!origin) {
     const host = req.get("host");
-    
+
     if (process.env.NODE_ENV === "production") {
       if (host?.includes("fly.dev") || userAgent.includes("Next.js")) {
         res.header("Access-Control-Allow-Origin", allowedOrigins[0]);
-        res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+        res.header(
+          "Access-Control-Allow-Methods",
+          "GET, POST, PUT, DELETE, OPTIONS",
+        );
+        res.header(
+          "Access-Control-Allow-Headers",
+          "Origin, X-Requested-With, Content-Type, Accept, Authorization",
+        );
         if (req.method === "OPTIONS") {
           return res.sendStatus(200);
         }
@@ -56,8 +65,14 @@ app.use((req, res, next) => {
     }
 
     res.header("Access-Control-Allow-Origin", allowedOrigins[0]);
-    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    res.header(
+      "Access-Control-Allow-Methods",
+      "GET, POST, PUT, DELETE, OPTIONS",
+    );
+    res.header(
+      "Access-Control-Allow-Headers",
+      "Origin, X-Requested-With, Content-Type, Accept, Authorization",
+    );
     if (req.method === "OPTIONS") {
       return res.sendStatus(200);
     }
@@ -67,8 +82,14 @@ app.use((req, res, next) => {
   if (allowedOrigins.includes(origin)) {
     res.header("Access-Control-Allow-Origin", origin);
     res.header("Access-Control-Allow-Credentials", "true");
-    res.header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    res.header(
+      "Access-Control-Allow-Methods",
+      "GET, POST, PUT, DELETE, OPTIONS",
+    );
+    res.header(
+      "Access-Control-Allow-Headers",
+      "Origin, X-Requested-With, Content-Type, Accept, Authorization",
+    );
     if (req.method === "OPTIONS") {
       return res.sendStatus(200);
     }
@@ -79,30 +100,42 @@ app.use((req, res, next) => {
   return res.status(403).json({ error: "Not allowed by CORS" });
 });
 
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'"],
-      objectSrc: ["'none'"],
-      mediaSrc: ["'self'"],
-      frameSrc: ["'none'"],
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'"],
+        imgSrc: ["'self'", "data:", "https:"],
+        connectSrc: ["'self'"],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        mediaSrc: ["'self'"],
+        frameSrc: ["'none'"],
+      },
     },
-  },
-  crossOriginEmbedderPolicy: false,
-  crossOriginResourcePolicy: { policy: "cross-origin" },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true
-  },
-  frameguard: { action: 'deny' },
-  noSniff: true,
-}));
+    crossOriginEmbedderPolicy: false,
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true,
+    },
+    frameguard: { action: "deny" },
+    noSniff: true,
+    referrerPolicy: { policy: "strict-origin-when-cross-origin" },
+  }),
+);
+
+// Additional security headers
+app.use((req, res, next) => {
+  res.setHeader(
+    "Permissions-Policy",
+    "geolocation=(), microphone=(), camera=()",
+  );
+  next();
+});
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
@@ -141,41 +174,48 @@ app.use((req, res) => {
   res.status(404).json({ error: "Endpoint not found" });
 });
 
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error("Error occurred:", {
-    message: err.message,
-    stack: process.env.NODE_ENV !== "production" ? err.stack : undefined,
-    path: req.path,
-    method: req.method,
-    timestamp: new Date().toISOString(),
-  });
-
-  const statusCode = err.statusCode || err.status || 500;
-
-  if (process.env.NODE_ENV === "production") {
-    const safeMessages: { [key: number]: string } = {
-      400: "Bad request",
-      401: "Unauthorized",
-      403: "Forbidden",
-      404: "Not found",
-      429: "Too many requests",
-      500: "Internal server error",
-      503: "Service unavailable",
-    };
-
-    return res.status(statusCode).json({
-      error: safeMessages[statusCode] || "An error occurred",
+app.use(
+  (
+    err: any,
+    req: express.Request,
+    res: express.Response,
+    next: express.NextFunction,
+  ) => {
+    console.error("Error occurred:", {
+      message: err.message,
+      stack: process.env.NODE_ENV !== "production" ? err.stack : undefined,
+      path: req.path,
+      method: req.method,
+      timestamp: new Date().toISOString(),
     });
-  }
 
-  res.status(statusCode).json({
-    error: err.message || "An error occurred",
-    ...(process.env.NODE_ENV === "development" && {
-      stack: err.stack,
-      details: err.details,
-    }),
-  });
-});
+    const statusCode = err.statusCode || err.status || 500;
+
+    if (process.env.NODE_ENV === "production") {
+      const safeMessages: { [key: number]: string } = {
+        400: "Bad request",
+        401: "Unauthorized",
+        403: "Forbidden",
+        404: "Not found",
+        429: "Too many requests",
+        500: "Internal server error",
+        503: "Service unavailable",
+      };
+
+      return res.status(statusCode).json({
+        error: safeMessages[statusCode] || "An error occurred",
+      });
+    }
+
+    res.status(statusCode).json({
+      error: err.message || "An error occurred",
+      ...(process.env.NODE_ENV === "development" && {
+        stack: err.stack,
+        details: err.details,
+      }),
+    });
+  },
+);
 
 async function start() {
   try {
@@ -186,12 +226,15 @@ async function start() {
     }
 
     await createAuditLogsTable();
+    await tokenBlacklistDb.init();
 
     app.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
       console.log(`📝 Environment: ${process.env.NODE_ENV || "development"}`);
       console.log(`🌐 Allowed origins: ${allowedOrigins.join(", ")}`);
-      console.log(`🔒 Security: Enhanced headers, token rotation, audit logging enabled`);
+      console.log(
+        `🔒 Security: Enhanced headers, token rotation, audit logging enabled`,
+      );
     });
   } catch (error) {
     console.error("Failed to start server:", error);

@@ -2,25 +2,31 @@ import { Request, Response, NextFunction } from "express";
 import { verifyAccessToken } from "../utils/tokens";
 
 export interface JWTPayload {
-  sub?: string;  // User ID
+  sub?: string; // User ID
   email?: string;
   name?: string;
   role?: string;
   image?: string; // User avatar
 }
 
-export function verifyToken(req: Request, res: Response, next: NextFunction) {
+export async function verifyToken(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    return res.status(401).json({ error: "Missing or invalid authorization header" });
+    return res
+      .status(401)
+      .json({ error: "Missing or invalid authorization header" });
   }
 
   const token = authHeader.substring(7); // Remove "Bearer " prefix
 
   try {
-    // SECURITY: Use separate access token secret for verification
-    const decoded = verifyAccessToken(token);
+    // SECURITY: Use separate access token secret for verification (now async for DB blacklist check)
+    const decoded = await verifyAccessToken(token);
 
     // Attach user info to request
     (req as any).user = {
@@ -55,7 +61,11 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
   });
 }
 
-export function optionalAuth(req: Request, res: Response, next: NextFunction) {
+export async function optionalAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   const authHeader = req.headers.authorization;
 
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -67,7 +77,7 @@ export function optionalAuth(req: Request, res: Response, next: NextFunction) {
   const token = authHeader.substring(7);
 
   try {
-    const decoded = verifyAccessToken(token);
+    const decoded = await verifyAccessToken(token);
 
     (req as any).user = {
       id: decoded.sub || "",

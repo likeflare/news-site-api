@@ -30,10 +30,13 @@ router.post("/", async (req, res) => {
     const validation = createUserSchema.safeParse(req.body);
 
     if (!validation.success) {
-      return res.status(400).json({ error: "Invalid user data", details: validation.error });
+      return res
+        .status(400)
+        .json({ error: "Invalid user data", details: validation.error });
     }
 
-    const { email, name, avatar_url, provider, provider_id, auth_secret } = validation.data;
+    const { email, name, avatar_url, provider, provider_id, auth_secret } =
+      validation.data;
 
     // Verify server-side secret token
     const expectedSecret = process.env.USER_CREATION_SECRET;
@@ -45,7 +48,7 @@ router.post("/", async (req, res) => {
     // Use timing-safe comparison to prevent timing attacks
     const secretMatch = crypto.timingSafeEqual(
       Buffer.from(auth_secret),
-      Buffer.from(expectedSecret)
+      Buffer.from(expectedSecret),
     );
 
     if (!secretMatch) {
@@ -76,7 +79,6 @@ router.post("/", async (req, res) => {
           email: email,
           role: user.role,
         },
-        existed: true,
       };
       statusCode = 200;
     } else {
@@ -92,7 +94,16 @@ router.post("/", async (req, res) => {
             created_at, updated_at, created_at_int, updated_at_int
           ) VALUES (?, ?, ?, ?, ?, ?, 'user', datetime('now'), datetime('now'), ?, ?)
         `,
-        args: [userId, name, email, avatar_url || null, provider, provider_id, now, now],
+        args: [
+          userId,
+          name,
+          email,
+          avatar_url || null,
+          provider,
+          provider_id,
+          now,
+          now,
+        ],
       });
 
       // Cache the role
@@ -105,9 +116,8 @@ router.post("/", async (req, res) => {
           email: email,
           role: "user",
         },
-        existed: false,
       };
-      statusCode = 201;
+      statusCode = 200; // Changed from 201 to 200 to match existing user response
     }
 
     // SECURITY: Add constant-time delay to prevent timing attacks
@@ -115,7 +125,9 @@ router.post("/", async (req, res) => {
     const elapsed = Date.now() - startTime;
     const minimumDelay = 150;
     if (elapsed < minimumDelay) {
-      await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+      await new Promise((resolve) =>
+        setTimeout(resolve, minimumDelay - elapsed),
+      );
     }
 
     return res.status(statusCode).json(responseData);
@@ -126,7 +138,9 @@ router.post("/", async (req, res) => {
     const elapsed = Date.now() - startTime;
     const minimumDelay = 150;
     if (elapsed < minimumDelay) {
-      await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+      await new Promise((resolve) =>
+        setTimeout(resolve, minimumDelay - elapsed),
+      );
     }
 
     res.status(500).json({ error: "Failed to create user" });
@@ -201,7 +215,7 @@ router.get("/:userId", requireAuth, async (req, res) => {
  */
 router.post("/lookup/email", requireAuth, async (req, res) => {
   const startTime = Date.now();
-  
+
   try {
     const { email } = req.body;
     const currentUser = (req as any).user;
@@ -217,7 +231,9 @@ router.post("/lookup/email", requireAuth, async (req, res) => {
       const elapsed = Date.now() - startTime;
       const minimumDelay = 100;
       if (elapsed < minimumDelay) {
-        await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+        await new Promise((resolve) =>
+          setTimeout(resolve, minimumDelay - elapsed),
+        );
       }
       return res.status(403).json({ error: "Access denied" });
     }
@@ -236,14 +252,16 @@ router.post("/lookup/email", requireAuth, async (req, res) => {
 
       if (result.rows.length === 0) {
         roleCache.invalidate(email);
-        
+
         // SECURITY: Add timing delay for consistency
         const elapsed = Date.now() - startTime;
         const minimumDelay = 100;
         if (elapsed < minimumDelay) {
-          await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+          await new Promise((resolve) =>
+            setTimeout(resolve, minimumDelay - elapsed),
+          );
         }
-        
+
         return res.json({ user: null });
       }
 
@@ -251,7 +269,9 @@ router.post("/lookup/email", requireAuth, async (req, res) => {
       const elapsed = Date.now() - startTime;
       const minimumDelay = 100;
       if (elapsed < minimumDelay) {
-        await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+        await new Promise((resolve) =>
+          setTimeout(resolve, minimumDelay - elapsed),
+        );
       }
 
       return res.json({
@@ -274,9 +294,11 @@ router.post("/lookup/email", requireAuth, async (req, res) => {
       const elapsed = Date.now() - startTime;
       const minimumDelay = 100;
       if (elapsed < minimumDelay) {
-        await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+        await new Promise((resolve) =>
+          setTimeout(resolve, minimumDelay - elapsed),
+        );
       }
-      
+
       return res.json({ user: null });
     }
 
@@ -287,7 +309,9 @@ router.post("/lookup/email", requireAuth, async (req, res) => {
     const elapsed = Date.now() - startTime;
     const minimumDelay = 100;
     if (elapsed < minimumDelay) {
-      await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+      await new Promise((resolve) =>
+        setTimeout(resolve, minimumDelay - elapsed),
+      );
     }
 
     res.json({
@@ -299,14 +323,16 @@ router.post("/lookup/email", requireAuth, async (req, res) => {
     });
   } catch (error) {
     console.error("Email lookup error:", error);
-    
+
     // SECURITY: Add timing delay even for errors
     const elapsed = Date.now() - startTime;
     const minimumDelay = 100;
     if (elapsed < minimumDelay) {
-      await new Promise(resolve => setTimeout(resolve, minimumDelay - elapsed));
+      await new Promise((resolve) =>
+        setTimeout(resolve, minimumDelay - elapsed),
+      );
     }
-    
+
     res.status(500).json({ error: "Failed to lookup user" });
   }
 });
@@ -321,7 +347,8 @@ router.get("/", requireAdmin, async (req, res) => {
     const { limit = "50", offset = "0", search } = req.query;
     const client = getDatabaseClient();
 
-    let query = "SELECT id, name, email, avatar_url, role, created_at, updated_at FROM users WHERE 1=1";
+    let query =
+      "SELECT id, name, email, avatar_url, role, created_at, updated_at FROM users WHERE 1=1";
     const args: any[] = [];
 
     if (search) {
