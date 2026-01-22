@@ -131,7 +131,7 @@ router.post("/", async (req, res) => {
   try {
     const body = req.body;
     const client = getDatabaseClient();
-    const now = Math.floor(Date.now() / 1000);
+    const now = Date.now();
     const id = `article-${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
     const sanitizedContent = body.content
@@ -211,7 +211,7 @@ router.patch("/:id/featured", async (req, res) => {
     const { is_featured } = req.body;
 
     const client = getDatabaseClient();
-    const now = Math.floor(Date.now() / 1000);
+    const now = Date.now();
 
     await client.execute({
       sql: `UPDATE articles SET is_featured = ?, updated_at_int = ? WHERE id = ?`,
@@ -259,7 +259,7 @@ router.put("/:id", async (req, res) => {
     delete updates.id; // Remove id from updates if present
 
     const client = getDatabaseClient();
-    const now = Math.floor(Date.now() / 1000);
+    const now = Date.now();
 
     // Sanitize content fields
     if (updates.content)

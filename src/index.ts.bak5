@@ -173,10 +173,6 @@ app.use("/api/admin/authors", adminAuthorsRouter);
 app.use("/api/admin/categories", adminCategoriesRouter);
 app.use("/api/admin/tags", adminTagsRouter);
 
-// Webhook routes (PUBLIC - no auth)
-import articleProgressWebhook from "./routes/webhooks/article-progress";
-app.use("/api/webhooks/article-progress", articleProgressWebhook);
-
 app.use((req, res) => {
   res.status(404).json({ error: "Endpoint not found" });
 });

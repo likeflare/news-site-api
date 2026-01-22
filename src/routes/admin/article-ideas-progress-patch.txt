@@ -1,0 +1,63 @@
+// PATCH /api/admin/article-ideas/:id/progress - Update progress status
+router.patch("/:id/progress", async (req, res) => {
+  const user = (req as any).user;
+  try {
+    const { id } = req.params;
+    const { progress } = req.body;
+
+    // Validate progress value
+    const validStates = ['pending', 'started', 'done', 'failed'];
+    if (!validStates.includes(progress)) {
+      return res.status(400).json({ error: `Invalid progress state. Must be one of: ${validStates.join(', ')}` });
+    }
+
+    const client = getDatabaseClient();
+    const now = Date.now();
+
+    // Update progress with appropriate timestamps
+    if (progress === 'started') {
+      await client.execute({
+        sql: `UPDATE article_ideas SET progress = ?, progress_started_at = ? WHERE id = ?`,
+        args: [progress, now, id],
+      });
+    } else if (progress === 'done' || progress === 'failed') {
+      await client.execute({
+        sql: `UPDATE article_ideas SET progress = ?, progress_completed_at = ? WHERE id = ?`,
+        args: [progress, now, id],
+      });
+    } else {
+      await client.execute({
+        sql: `UPDATE article_ideas SET progress = ? WHERE id = ?`,
+        args: [progress, id],
+      });
+    }
+
+    await logAdminAction({
+      userId: user.id,
+      userEmail: user.email,
+      action: "UPDATE_ARTICLE_IDEA_PROGRESS",
+      resource: "article_ideas",
+      resourceId: id,
+      details: { progress },
+      ipAddress: req.get("fly-client-ip") || req.ip,
+      userAgent: req.get("user-agent"),
+      success: true,
+    });
+
+    res.json({ success: true, progress });
+  } catch (error) {
+    await logAdminAction({
+      userId: user.id,
+      userEmail: user.email,
+      action: "UPDATE_ARTICLE_IDEA_PROGRESS",
+      resource: "article_ideas",
+      resourceId: req.params.id,
+      details: { error: (error as Error).message },
+      ipAddress: req.get("fly-client-ip") || req.ip,
+      userAgent: req.get("user-agent"),
+      success: false,
+    });
+    console.error("Update progress error:", error);
+    res.status(500).json({ error: "Failed to update progress" });
+  }
+});
